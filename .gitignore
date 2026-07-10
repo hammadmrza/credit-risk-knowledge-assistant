@@ -1,0 +1,17 @@
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ── Virtual environments ─────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Generated index + audit log (rebuilt by ingestion) ───────────
+rag_store/
+
+# ── Environment ──────────────────────────────────────────────────
+.env
