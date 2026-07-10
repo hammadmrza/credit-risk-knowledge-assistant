@@ -69,6 +69,18 @@ with st.sidebar:
         st.info("Retrieval: local (lexical). Start Ollama + pull "
                 "`nomic-embed-text` for semantic search.")
 
+    gen = status.get("generation_active", "")
+    if gen.startswith("anthropic (Claude"):
+        st.success("Answers: Claude API (cloud)")
+    elif gen.startswith("anthropic (no API key"):
+        st.warning("Answers: Claude selected but ANTHROPIC_API_KEY is unset — "
+                   "set it to enable written answers.")
+    elif gen.startswith("off"):
+        st.info("Answers: passages only (generation off).")
+    else:
+        st.info("Answers: Ollama, or passages if offline. Set "
+                "`ANTHROPIC_API_KEY` for cloud-written answers (no download).")
+
     st.caption(f"Audit events logged: {status['audit_events']}")
 
     st.divider()

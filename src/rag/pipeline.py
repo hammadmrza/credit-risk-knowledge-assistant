@@ -37,10 +37,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import config
 from src.rag.audit import AuditLog
@@ -114,9 +115,12 @@ class RAGPipeline:
 
     Args:
         index_path: Where the vector index is persisted (JSON).
-        prefer_ollama: Use Ollama for embeddings/generation when available.
+        prefer_ollama: Use Ollama for embeddings when available.
         chunk_size / overlap: Chunking parameters (default from config).
         audit: Enable the audit trail (default from config.AUDIT_ENABLED).
+        generation: Override the answer-generation provider
+            ("auto" | "anthropic" | "ollama" | "off"); defaults to
+            config.GENERATION_PROVIDER.
     """
 
     def __init__(self,
@@ -124,12 +128,14 @@ class RAGPipeline:
                  prefer_ollama: bool = True,
                  chunk_size: Optional[int] = None,
                  overlap: Optional[int] = None,
-                 audit: Optional[bool] = None):
+                 audit: Optional[bool] = None,
+                 generation: Optional[str] = None):
         self.index_path = Path(index_path or config.RAG_INDEX_PATH)
         self.chunk_size = chunk_size or config.RAG_CHUNK_SIZE
         self.overlap = overlap if overlap is not None else config.RAG_CHUNK_OVERLAP
         self.embedder = Embedder(prefer_ollama=prefer_ollama)
         self.store = VectorStore.load(self.index_path)
+        self.generation = generation or getattr(config, "GENERATION_PROVIDER", "auto")
         audit_enabled = getattr(config, "AUDIT_ENABLED", True) if audit is None else audit
         self.audit = AuditLog(getattr(config, "AUDIT_LOG_PATH",
                                       self.index_path.parent / "audit_log.jsonl"),
@@ -271,11 +277,71 @@ class RAGPipeline:
         resp = (data.get("response") or "").strip()
         return resp or None
 
+    def _generate_anthropic(self, question: str, context: str) -> Optional[str]:
+        """Write the answer with the Claude API. ``None`` if unavailable.
+
+        Requires the ``anthropic`` package and ANTHROPIC_API_KEY in the
+        environment. Never raises — returns ``None`` so the caller falls back.
+        """
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            return None
+        try:
+            import anthropic  # type: ignore
+        except ImportError:
+            log.warning("GENERATION_PROVIDER wants Claude but the 'anthropic' "
+                        "package is not installed (pip install anthropic).")
+            return None
+        prompt = (
+            f"Context passages:\n{context}\n\n"
+            f"Question: {question}\n\n"
+            "Answer using only the passages above, citing passage numbers."
+        )
+        try:
+            client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY / base URL
+            resp = client.messages.create(
+                model=getattr(config, "ANTHROPIC_MODEL", "claude-opus-4-8"),
+                max_tokens=getattr(config, "ANTHROPIC_MAX_TOKENS", 1024),
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if resp.stop_reason == "refusal":
+                return None
+            text = "".join(b.text for b in resp.content
+                           if getattr(b, "type", None) == "text").strip()
+            return text or None
+        except Exception as e:
+            log.warning("Claude API call failed (%s) — falling back.", e)
+            return None
+
+    def _generate(self, question: str, context: str) -> Tuple[Optional[str], Optional[str]]:
+        """Generate the answer via the configured provider chain.
+
+        Returns (text, backend_name). Both ``None`` if no provider produced
+        an answer (caller then uses the extractive fallback).
+        """
+        provider = self.generation
+        if provider == "anthropic":
+            order = ["anthropic"]
+        elif provider == "ollama":
+            order = ["ollama"]
+        elif provider == "off":
+            order = []
+        else:  # "auto"
+            order = (["anthropic", "ollama"] if os.getenv("ANTHROPIC_API_KEY")
+                     else ["ollama"])
+        for p in order:
+            text = (self._generate_anthropic(question, context) if p == "anthropic"
+                    else self._generate_ollama(question, context))
+            if text is not None:
+                return text, p
+        return None, None
+
     def _extractive_answer(self, chunks: List[RetrievedChunk]) -> str:
         """LLM-free answer: stitch the top passages together with citations."""
         lines = [
-            "Ollama is offline, so here are the most relevant passages from "
-            "the knowledge base (no generated summary):",
+            "No answer-generation model is available, so here are the most "
+            "relevant passages from the knowledge base (no generated summary). "
+            "Set ANTHROPIC_API_KEY or run Ollama to get written answers:",
             "",
         ]
         for i, c in enumerate(chunks, 1):
@@ -306,12 +372,12 @@ class RAGPipeline:
             return ans
 
         context = self._build_context(chunks)
-        generated = self._generate_ollama(question, context)
+        generated, backend = self._generate(question, context)
         if generated is not None:
             ans = Answer(text=generated, sources=chunks, grounded=True,
-                         backend="ollama")
+                         backend=backend)
         else:
-            # Ollama offline → extractive fallback (retrieval still works).
+            # No LLM available → extractive fallback (retrieval still works).
             ans = Answer(text=self._extractive_answer(chunks), sources=chunks,
                          grounded=True, backend="extractive")
         self._audit(question, ans, user)
@@ -335,5 +401,20 @@ class RAGPipeline:
             "embedding_backend": self.embedder.backend,
             "embedding_signature": self.embedder.signature,
             "index_signature": self.store.embedding_signature,
+            "generation_provider": self.generation,
+            "generation_active": self._active_generation(),
             "audit_events": self.audit.count(),
         }
+
+    def _active_generation(self) -> str:
+        """Best-effort description of which generator a query would use."""
+        if self.generation == "off":
+            return "off (extractive only)"
+        if self.generation == "anthropic":
+            return "anthropic" if os.getenv("ANTHROPIC_API_KEY") else "anthropic (no API key set)"
+        if self.generation == "ollama":
+            return "ollama"
+        # auto
+        if os.getenv("ANTHROPIC_API_KEY"):
+            return "anthropic (Claude API)"
+        return "ollama (or extractive if offline)"

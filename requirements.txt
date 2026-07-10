@@ -17,6 +17,12 @@ streamlit>=1.28.0
 # The engine falls back to stdlib urllib if httpx is absent.
 httpx>=0.25.0
 
+# ── Cloud answer generation (optional) ───────────────────────────
+# Enables written answers via the Claude API with no local model
+# download — set ANTHROPIC_API_KEY and GENERATION_PROVIDER="auto".
+# Without it, generation uses Ollama or the extractive fallback.
+anthropic>=0.40.0
+
 # ── Document parsing (optional) ──────────────────────────────────
 # Only needed to index PDF / Word documents; text/markdown/CSV work
 # without them. Missing parsers cause those file types to be skipped

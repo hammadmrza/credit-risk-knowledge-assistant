@@ -38,6 +38,21 @@ RAG_TOP_K         = 5        # chunks retrieved per query
 RAG_MIN_SCORE     = 0.15     # cosine floor — below this, treat as "no match"
 RAG_MAX_CONTEXT   = 6_000    # max characters of context sent to the LLM
 
+# ── Answer generation provider ───────────────────────────────────
+# Which LLM writes the final answer from the retrieved passages:
+#   "auto"      — use the Claude API if ANTHROPIC_API_KEY is set, else Ollama
+#   "anthropic" — always use the Claude API (cloud; no local model needed)
+#   "ollama"    — always use the local Ollama model
+#   "off"       — never generate; return the retrieved passages verbatim
+# Retrieval is unaffected — only who writes the prose answer.
+GENERATION_PROVIDER = "auto"
+
+# Claude API model used when the provider resolves to "anthropic".
+# Set ANTHROPIC_API_KEY in the environment to enable it. Change this to
+# "claude-haiku-4-5" for a cheaper/faster option if you prefer.
+ANTHROPIC_MODEL     = "claude-opus-4-8"
+ANTHROPIC_MAX_TOKENS = 1_024
+
 # ── Audit trail ──────────────────────────────────────────────────
 # Every question, its answer, and the exact sources cited are appended
 # to an audit log for compliance / OSFI traceability.

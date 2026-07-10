@@ -102,7 +102,8 @@ def test_pipeline_end_to_end_offline():
         root = Path(d)
         _make_corpus(root)
         idx = root / "index.json"
-        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False)
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="ollama")
 
         stats = rag.ingest_dir(root)
         assert stats["files"] == 3
@@ -131,7 +132,8 @@ def test_reingest_is_idempotent():
         root = Path(d)
         (root / "doc.md").write_text("The loan cap is 50000.", encoding="utf-8")
         idx = root / "index.json"
-        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False)
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="ollama")
         rag.ingest(root / "doc.md")
         n1 = len(rag.store)
         rag.ingest(root / "doc.md")  # same file again
@@ -141,7 +143,8 @@ def test_reingest_is_idempotent():
 def test_empty_index_query_is_safe():
     with tempfile.TemporaryDirectory() as d:
         idx = Path(d) / "index.json"
-        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False)
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="ollama")
         ans = rag.query("anything?")
         assert ans.grounded is False
         assert "empty" in ans.text.lower()
@@ -155,7 +158,8 @@ def test_source_manifest_records_version():
         (root / "policy.md").write_text("The DTI cap is 45 percent.",
                                         encoding="utf-8")
         idx = root / "index.json"
-        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False)
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="ollama")
         src = rag.ingest(root / "policy.md")["sources"][0]
         ver = rag.store.source_version(src)
         assert ver.get("sha")            # content hash recorded
@@ -172,13 +176,47 @@ def test_audit_log_written():
                                         encoding="utf-8")
         idx = root / "index.json"
         audit_path = root / "audit.jsonl"
-        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=True)
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=True,
+                          generation="ollama")
         rag.audit.path = audit_path  # redirect to temp
         rag.ingest(root / "policy.md")
         rag.query("what is the dti cap", user="tester")
         events = rag.audit.tail(5)
         assert events and events[-1]["user"] == "tester"
         assert events[-1]["question"] == "what is the dti cap"
+
+
+# ── generation provider resolution ───────────────────────────────
+
+def test_generation_off_forces_extractive():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "policy.md").write_text("The DTI cap is 45 percent.",
+                                        encoding="utf-8")
+        idx = root / "index.json"
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="off")
+        rag.ingest(root / "policy.md")
+        ans = rag.query("what is the dti cap")
+        # "off" never calls a model → extractive, still grounded + cited
+        assert ans.backend == "extractive"
+        assert ans.grounded is True and ans.sources
+
+
+def test_anthropic_generation_skipped_without_key():
+    import os
+    from src.rag.pipeline import RAGPipeline as RP
+    with tempfile.TemporaryDirectory() as d:
+        idx = Path(d) / "index.json"
+        rag = RP(index_path=idx, prefer_ollama=False, audit=False,
+                 generation="anthropic")
+        # With no API key, the anthropic path returns None (no crash/import).
+        prev = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            assert rag._generate_anthropic("q", "ctx") is None
+        finally:
+            if prev is not None:
+                os.environ["ANTHROPIC_API_KEY"] = prev
 
 
 # ── loaders ──────────────────────────────────────────────────────

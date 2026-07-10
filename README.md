@@ -60,6 +60,32 @@ Without Ollama, the assistant still works: it uses a deterministic local
 (lexical) embedding and returns the relevant passages verbatim, with the
 same citations.
 
+### Written answers without a local model — use the Claude API
+
+Prefer not to download a local model? Set an Anthropic API key and the
+assistant writes answers via the Claude API — no download, no GPU:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...        # Windows: set ANTHROPIC_API_KEY=...
+python -m src.rag.cli query "What is the DTI cap for unsecured loans?"
+```
+
+`GENERATION_PROVIDER` in `config.py` controls who writes the answer:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Claude API if `ANTHROPIC_API_KEY` is set, else Ollama |
+| `anthropic` | Always the Claude API |
+| `ollama` | Always the local Ollama model |
+| `off` | Never generate — return the retrieved passages verbatim |
+
+The model is `ANTHROPIC_MODEL` (`claude-opus-4-8` by default; set it to
+`claude-haiku-4-5` for a cheaper, faster option). **Retrieval is separate
+from generation** — with a cloud key you get written answers, but semantic
+*search* still needs Ollama embeddings (or falls back to local lexical
+search). For a fully on-prem deployment over confidential documents, keep
+generation on Ollama so no content leaves the machine.
+
 ---
 
 ## What you get
