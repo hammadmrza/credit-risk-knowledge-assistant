@@ -72,11 +72,24 @@ EXAMPLE_QUESTIONS = [
 ]
 
 
+def open_document(source: str):
+    """Point the document reader at a source and expand it.
+
+    Writes a *non-widget* key (`pending_doc`); the reader applies it to the
+    selectbox before that widget is instantiated — Streamlit forbids setting
+    a widget-keyed value after the widget exists.
+    """
+    st.session_state["pending_doc"] = source
+    st.session_state["open_reader"] = True
+    st.rerun()
+
+
 def render_sources(ans, key_prefix=""):
-    """Perplexity-style numbered, expandable source cards."""
+    """Perplexity-style numbered, expandable source cards with 'open full doc'."""
     if not ans.sources:
         return
     with st.expander(f"🔎 Sources ({len(ans.sources)}) — click any to verify"):
+        seen = set()
         for i, s in enumerate(ans.sources, 1):
             ver = s.version.get("ingested_at", "")
             st.markdown(f"**[{i}] {s.citation}**")
@@ -84,6 +97,11 @@ def render_sources(ans, key_prefix=""):
                        (f"  ·  as-of {ver}" if ver else ""))
             body = s.text.split("]\n", 1)[-1].strip()
             st.caption(body[:800] + ("…" if len(body) > 800 else ""))
+            if s.source not in seen:      # one "open" button per document
+                seen.add(s.source)
+                if st.button(f"📖 Read all of {s.source}",
+                             key=f"open_{key_prefix}_{i}"):
+                    open_document(s.source)
 
 
 # ── Header ───────────────────────────────────────────────────────
@@ -103,6 +121,15 @@ st.markdown(
 )
 
 rag = get_pipeline()
+
+# Deployed hosts: pick up an API key from Streamlit Secrets if one is set,
+# so operators can preconfigure the cloud engine without code changes.
+try:
+    if "ANTHROPIC_API_KEY" in st.secrets and not os.getenv("ANTHROPIC_API_KEY"):
+        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+except Exception:
+    pass  # no secrets.toml present — fine
+
 status = rag.status()
 
 # ── Sidebar ──────────────────────────────────────────────────────
@@ -112,6 +139,7 @@ with st.sidebar:
         "How should answers be written?",
         list(ENGINE_CHOICES.keys()),
         index=0,
+        key="engine_sel",
         label_visibility="collapsed",
     )
     provider = ENGINE_CHOICES[choice]
@@ -226,10 +254,16 @@ where each fact came from**, so you can trust and verify it.
         """
     )
 
-# ── Empty knowledge base ─────────────────────────────────────────
+# ── Empty knowledge base — auto-load the seed docs on first run ──
 if status["num_chunks"] == 0:
-    st.warning("Your knowledge base is empty. Click **🔄 (Re)load sample "
-               "documents** in the sidebar to get started, or upload your own.")
+    seed_files = [p for p in Path(config.KNOWLEDGE_DIR).glob("*") if p.is_file()]
+    if seed_files and not st.session_state.get("_auto_ingested"):
+        st.session_state["_auto_ingested"] = True   # guard against a loop
+        with st.spinner("Preparing the knowledge base…"):
+            rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
+        st.rerun()
+    st.warning("Your knowledge base is empty. Add a document in the sidebar "
+               "to get started.")
     st.stop()
 
 # ── "What can I ask about?" — derived from the loaded documents ───
@@ -244,13 +278,38 @@ with st.expander("📋  What can I ask about?", expanded=first_visit):
         st.markdown(f"**{d['title']}**  \n<span style='color:#666'>{secs}</span>",
                     unsafe_allow_html=True)
 
+# ── Document reader — read any source in full to verify answers ──
+docs = status["sources"]
+# Apply a pending "open this document" request before the selectbox exists.
+_pending_doc = st.session_state.pop("pending_doc", None)
+if _pending_doc and _pending_doc in docs:
+    st.session_state["doc_reader_sel"] = _pending_doc
+with st.expander("📄  Read the source documents (verify answers yourself)",
+                 expanded=st.session_state.pop("open_reader", False)):
+    st.caption("Read a whole document top-to-bottom and check the assistant's "
+               "answers against the original — this is grounded RAG: every "
+               "answer traces back to text you can see here.")
+    sel = st.selectbox("Document", docs, key="doc_reader_sel")
+    if sel:
+        v = status["manifest"].get(sel, {})
+        st.caption(f"Version as-of {v.get('ingested_at', '—')}  ·  "
+                   f"content hash `{v.get('sha', '—')}`")
+        text = rag.document_text(sel)
+        if not text:
+            st.info("Full text isn't stored for this document — re-ingest to "
+                    "enable the reader.")
+        elif sel.lower().endswith((".md", ".markdown")):
+            st.markdown(text)
+        else:
+            st.text(text)
+
 # ── Chat history ─────────────────────────────────────────────────
-for turn in st.session_state.history:
+for turn_i, turn in enumerate(st.session_state.history):
     with st.chat_message(turn["role"]):
         st.markdown(turn["content"])
         ans = turn.get("answer")
         if ans is not None:
-            render_sources(ans)
+            render_sources(ans, key_prefix=str(turn_i))
             label = BACKEND_LABEL.get(ans.backend, "")
             if label:
                 st.caption(label)

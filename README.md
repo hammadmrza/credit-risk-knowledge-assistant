@@ -115,6 +115,30 @@ for s in ans.sources:
 
 ---
 
+## Deploy
+
+The chatbot is a self-contained Streamlit app that **auto-loads the seed
+documents on first run**, so hosting it is one step.
+
+**Streamlit Community Cloud (free):** point [share.streamlit.io](https://share.streamlit.io)
+at this repo, main file `src/app/chatbot.py`. Optionally add a
+`ANTHROPIC_API_KEY` in the app's **Secrets** to preconfigure cloud answers —
+otherwise each visitor pastes their own key (and no one spends yours).
+
+**Docker (anywhere):**
+
+```bash
+docker build -t knowledge-assistant .
+docker run -p 8501:8501 -e ANTHROPIC_API_KEY=sk-ant-... knowledge-assistant
+```
+
+> On a cloud host, the on-device (Ollama) engine isn't available, so answers
+> come from the Claude API (if a key is set) or fall back to cited passages.
+> For a fully private, on-prem deployment over confidential documents, run it
+> on your own machine with Ollama.
+
+---
+
 ## How it works
 
 ```

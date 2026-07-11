@@ -81,6 +81,9 @@ class VectorStore:
         self.embedding_signature = embedding_signature
         # Per-source provenance: source -> {ingested_at, sha, chunks}.
         self.manifest: dict = {}
+        # Full document text per source, so a UI can show the whole document
+        # for manual verification (works for uploads, not just files on disk).
+        self.documents: dict = {}
         self._matrix = None  # cached numpy matrix, invalidated on write
 
     # ── mutation ─────────────────────────────────────────────────
@@ -96,6 +99,14 @@ class VectorStore:
         self.manifest[source] = {
             "ingested_at": ingested_at, "sha": sha, "chunks": chunks}
 
+    def set_document(self, source: str, text: str) -> None:
+        """Store the full text of a source for the document viewer."""
+        self.documents[source] = text
+
+    def get_document(self, source: str) -> str:
+        """Return the full text of a source, or '' if unknown."""
+        return self.documents.get(source, "")
+
     def source_version(self, source: str) -> dict:
         """Return {ingested_at, sha, chunks} for a source, or {} if unknown."""
         return self.manifest.get(source, {})
@@ -105,6 +116,7 @@ class VectorStore:
         before = len(self.records)
         self.records = [r for r in self.records if r.source != source]
         self.manifest.pop(source, None)
+        self.documents.pop(source, None)
         self._matrix = None
         return before - len(self.records)
 
@@ -154,9 +166,10 @@ class VectorStore:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 2,
+            "version": 3,
             "embedding_signature": self.embedding_signature,
             "manifest": self.manifest,
+            "documents": self.documents,
             "records": [r.to_dict() for r in self.records],
         }
         # Atomic write: temp file in the same dir, then replace.
@@ -180,6 +193,7 @@ class VectorStore:
             payload = json.load(f)
         store.embedding_signature = payload.get("embedding_signature", "")
         store.manifest = payload.get("manifest", {})
+        store.documents = payload.get("documents", {})
         store.records = [Record.from_dict(d)
                          for d in payload.get("records", [])]
         return store

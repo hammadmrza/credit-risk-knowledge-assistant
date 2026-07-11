@@ -186,6 +186,27 @@ def test_audit_log_written():
         assert events[-1]["question"] == "what is the dti cap"
 
 
+# ── document viewer (full text stored + persisted) ───────────────
+
+def test_document_text_stored_and_persisted():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        body = "# Policy\n\nThe DTI cap is 45 percent. " * 20
+        (root / "policy.md").write_text(body, encoding="utf-8")
+        idx = root / "index.json"
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="off")
+        src = rag.ingest(root / "policy.md")["sources"][0]
+        assert rag.document_text(src) == body        # full text available
+
+        # survives a reload (persisted in the index)
+        rag2 = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                           generation="off")
+        assert rag2.document_text(src) == body
+        # removed when the source is re-ingested/replaced, not duplicated
+        assert src in rag2.store.documents
+
+
 # ── orientation (outline / topics) ───────────────────────────────
 
 def test_outline_and_topics_derive_from_documents():

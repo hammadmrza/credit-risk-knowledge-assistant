@@ -215,6 +215,7 @@ class RAGPipeline:
                       **{k: v for k, v in meta.items() if k != "path"}},
             )
         self.store.set_source_meta(source, ingested_at, sha, len(chunks))
+        self.store.set_document(source, text)   # for the document viewer
         return len(chunks)
 
     def ingest(self, path, reset: bool = False) -> dict:
@@ -488,6 +489,10 @@ class RAGPipeline:
             title = e["title"] or Path(src).stem.replace("_", " ").title()
             out.append({"source": src, "title": title, "sections": e["sections"]})
         return out
+
+    def document_text(self, source: str) -> str:
+        """Full text of an indexed document, for manual verification."""
+        return self.store.get_document(source)
 
     def topics(self, limit: int = 8) -> List[str]:
         """Meaningful topics across all documents, for chips / refusal hints.

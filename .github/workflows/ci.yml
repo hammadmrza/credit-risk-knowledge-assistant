@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The engine and its tests run on the Python standard library alone,
+      # so there is nothing to install — CI stays fast and dependency-free.
+      - name: Unit & integration tests
+        run: python tests/test_rag.py
+
+      - name: Retrieval quality (recall@k regression guard)
+        run: python eval/eval_set.py
