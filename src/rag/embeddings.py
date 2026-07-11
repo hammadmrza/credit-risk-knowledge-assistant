@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import os
 import re
 from typing import List, Optional
 
@@ -59,6 +60,40 @@ def ollama_embeddings_available(model: Optional[str] = None) -> bool:
         return False
     names = [m.get("name", "") for m in tags.get("models", [])]
     return any(model.split(":")[0] in n for n in names)
+
+
+# ── Cloud backend (Voyage AI — semantic, no local download) ──────
+
+def voyage_embeddings_available() -> bool:
+    """True if the Voyage SDK is installed and VOYAGE_API_KEY is set."""
+    if not os.getenv("VOYAGE_API_KEY"):
+        return False
+    try:
+        import voyageai  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _voyage_embed(text: str, model: str,
+                  input_type: Optional[str] = None) -> Optional[List[float]]:
+    """Embed one string via the Voyage API; ``None`` if unavailable.
+
+    Gives true semantic search with no local model download — matches on
+    meaning (so "borrowing limit" finds "maximum loan amount"). Never
+    raises: returns ``None`` so the caller falls back.
+    """
+    try:
+        import voyageai  # type: ignore
+
+        client = voyageai.Client()  # reads VOYAGE_API_KEY from the environment
+        result = client.embed([text], model=model, input_type=input_type)
+        vecs = getattr(result, "embeddings", None)
+        if vecs:
+            return [float(x) for x in vecs[0]]
+    except Exception as e:
+        log.warning("Voyage embedding failed (%s) — falling back.", e)
+    return None
 
 
 # ── Local hashing backend (dependency-free) ──────────────────────
@@ -106,59 +141,103 @@ def _hash_embed(text: str, dim: int) -> List[float]:
 class Embedder:
     """Embeds text, transparently choosing the best available backend.
 
+    Backends, in order of retrieval quality:
+      • ``ollama``  — a local embedding model (semantic, private, no cloud)
+      • ``voyage``  — the Voyage cloud API (semantic, no local download;
+                      needs VOYAGE_API_KEY)
+      • ``local``   — a deterministic hashing embedding (lexical; no deps,
+                      works everywhere)
+
+    The provider is chosen from ``config.RAG_EMBED_PROVIDER``
+    ("auto" | "ollama" | "voyage" | "local"). ``prefer_ollama=False`` forces
+    the pure-local backend — used by tests and offline demos so results are
+    deterministic and make no network calls.
+
     Args:
         model:   Ollama embedding model name.
         dim:     Dimension of the local fallback embedding.
-        prefer_ollama: If False, always use the local backend (useful for
-                       deterministic tests and offline demos).
+        prefer_ollama: If False, force the local backend.
+        provider: Override ``config.RAG_EMBED_PROVIDER``.
     """
 
     def __init__(self,
                  model: Optional[str] = None,
                  dim: Optional[int] = None,
-                 prefer_ollama: bool = True):
+                 prefer_ollama: bool = True,
+                 provider: Optional[str] = None):
         self.model = model or config.RAG_EMBED_MODEL
+        self.voyage_model = getattr(config, "VOYAGE_MODEL", "voyage-3")
         self.dim = dim or config.RAG_EMBED_DIM
         self.prefer_ollama = prefer_ollama
+        self.provider = provider or getattr(config, "RAG_EMBED_PROVIDER", "auto")
         self._backend: Optional[str] = None  # resolved lazily on first embed
 
     def _resolve_backend(self) -> str:
         if self._backend is not None:
             return self._backend
-        if self.prefer_ollama and ollama_embeddings_available(self.model):
-            self._backend = "ollama"
-        else:
-            if self.prefer_ollama:
-                log.warning(
-                    "Ollama embeddings unavailable — using local hashing "
-                    "embedding (lexical retrieval). Pull '%s' and run "
-                    "'ollama serve' for semantic retrieval.", self.model)
+        # Forced-local (tests / deterministic offline mode).
+        if not self.prefer_ollama:
             self._backend = "local"
+            return self._backend
+
+        prov = self.provider
+        if prov == "local":
+            self._backend = "local"
+        elif prov == "ollama":
+            self._backend = ("ollama" if ollama_embeddings_available(self.model)
+                             else self._local_warn("ollama"))
+        elif prov == "voyage":
+            self._backend = ("voyage" if voyage_embeddings_available()
+                             else self._local_warn("voyage"))
+        else:  # auto: best available
+            if ollama_embeddings_available(self.model):
+                self._backend = "ollama"
+            elif voyage_embeddings_available():
+                self._backend = "voyage"
+            else:
+                self._backend = self._local_warn("auto")
         return self._backend
+
+    def _local_warn(self, wanted: str) -> str:
+        log.warning(
+            "Semantic embeddings unavailable (%s) — using the local lexical "
+            "embedding. Run Ollama (`ollama pull %s`) or set VOYAGE_API_KEY "
+            "for meaning-based search.", wanted, self.model)
+        return "local"
 
     @property
     def backend(self) -> str:
-        """Which backend is in use: 'ollama' or 'local'."""
+        """Which backend is in use: 'ollama', 'voyage', or 'local'."""
         return self._resolve_backend()
 
     @property
     def signature(self) -> str:
         """Identifier stored with an index so we never mix vector spaces."""
-        if self.backend == "ollama":
+        b = self.backend
+        if b == "ollama":
             return f"ollama:{self.model}"
+        if b == "voyage":
+            return f"voyage:{self.voyage_model}"
         return f"local-hash:{self.dim}"
 
-    def embed(self, text: str) -> List[float]:
-        """Embed one string, falling back to local per-call if Ollama drops."""
-        if self._resolve_backend() == "ollama":
+    def embed(self, text: str, is_query: bool = False) -> List[float]:
+        """Embed one string, falling back to local per-call if the backend drops."""
+        backend = self._resolve_backend()
+        if backend == "ollama":
             vec = _ollama_embed(text, self.model)
             if vec is not None:
                 return vec
-            log.warning("Ollama embedding call failed mid-run — "
-                        "falling back to local embedding for this text.")
+            log.warning("Ollama embedding failed mid-run — local fallback.")
+            self._backend = "local"
+        elif backend == "voyage":
+            vec = _voyage_embed(text, self.voyage_model,
+                                input_type="query" if is_query else "document")
+            if vec is not None:
+                return vec
+            log.warning("Voyage embedding failed mid-run — local fallback.")
             self._backend = "local"
         return _hash_embed(text, self.dim)
 
     def embed_many(self, texts: List[str]) -> List[List[float]]:
-        """Embed a list of strings (sequential; Ollama has no batch API)."""
+        """Embed a list of strings (sequential)."""
         return [self.embed(t) for t in texts]

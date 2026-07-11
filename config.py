@@ -30,7 +30,14 @@ OLLAMA_MODEL    = "llama3"              # generation model
 OLLAMA_TIMEOUT  = 60                    # seconds
 
 # ── Retrieval / embedding ────────────────────────────────────────
+# Which backend turns text into search vectors:
+#   "auto"   — Ollama if running, else Voyage if VOYAGE_API_KEY is set, else local
+#   "ollama" — local Ollama embedding model (semantic, private)
+#   "voyage" — Voyage cloud API (semantic, no local download; needs a key)
+#   "local"  — deterministic lexical embedding (no deps, keyword-level search)
+RAG_EMBED_PROVIDER = "auto"
 RAG_EMBED_MODEL   = "nomic-embed-text"   # Ollama embedding model
+VOYAGE_MODEL      = "voyage-3"            # Voyage cloud embedding model
 RAG_EMBED_DIM     = 512      # dimension of the local fallback embedding
 RAG_CHUNK_SIZE    = 1_000    # target characters per chunk
 RAG_CHUNK_OVERLAP = 150      # character overlap between adjacent chunks

@@ -271,7 +271,7 @@ class RAGPipeline:
         min_score = config.RAG_MIN_SCORE if min_score is None else min_score
         if not len(self.store):
             return []
-        qvec = self.embedder.embed(question)
+        qvec = self.embedder.embed(question, is_query=True)
         hits = self.store.search(qvec, top_k=top_k)
         out = []
         for rec, score in hits:

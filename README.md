@@ -60,6 +60,29 @@ Without Ollama, the assistant still works: it uses a deterministic local
 (lexical) embedding and returns the relevant passages verbatim, with the
 same citations.
 
+### Run fully local (private / on-prem)
+
+Nothing leaves your machine — documents, search, and answers all run
+locally. Best for confidential material.
+
+```bash
+# 1. Install Ollama (one-time):  https://ollama.com/download
+# 2. Pull the models and start the server:
+ollama pull nomic-embed-text     # semantic search   (~275 MB)
+ollama pull llama3               # written answers    (~4.7 GB)
+ollama serve
+
+# 3. Install Python deps, index the docs, launch:
+pip install -r requirements.txt
+python -m src.rag.cli ingest knowledge/ --reset
+streamlit run src/app/chatbot.py
+```
+
+Dependencies: **Python 3.10+**, **Ollama** (for local mode), and the
+packages in `requirements.txt` (`streamlit`, `numpy`, plus optional
+`fastapi`/`httpx`/`anthropic`/`voyageai`/`pypdf`/`python-docx`). In the
+app's sidebar pick **"💻 On my computer — Ollama"** as the answer engine.
+
 ### Written answers without a local model — use the Claude API
 
 Prefer not to download a local model? Set an Anthropic API key and the
@@ -81,10 +104,12 @@ python -m src.rag.cli query "What is the DTI cap for unsecured loans?"
 
 The model is `ANTHROPIC_MODEL` (`claude-opus-4-8` by default; set it to
 `claude-haiku-4-5` for a cheaper, faster option). **Retrieval is separate
-from generation** — with a cloud key you get written answers, but semantic
-*search* still needs Ollama embeddings (or falls back to local lexical
-search). For a fully on-prem deployment over confidential documents, keep
-generation on Ollama so no content leaves the machine.
+from generation.** For meaning-based *search* without a local model, set
+`VOYAGE_API_KEY` and `RAG_EMBED_PROVIDER="voyage"` (Voyage cloud
+embeddings); otherwise search uses Ollama embeddings, and falls back to
+local keyword search if neither is available. For a fully on-prem
+deployment over confidential documents, keep both retrieval and generation
+on Ollama so nothing leaves the machine.
 
 ---
 

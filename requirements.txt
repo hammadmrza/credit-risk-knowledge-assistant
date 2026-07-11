@@ -23,6 +23,12 @@ httpx>=0.25.0
 # Without it, generation uses Ollama or the extractive fallback.
 anthropic>=0.40.0
 
+# ── Cloud semantic search (optional) ─────────────────────────────
+# Meaning-based retrieval with no local model — set VOYAGE_API_KEY and
+# RAG_EMBED_PROVIDER="voyage" (or "auto"). Without it (and without
+# Ollama), retrieval uses the local keyword embedding.
+voyageai>=0.2.0
+
 # ── Document parsing (optional) ──────────────────────────────────
 # Only needed to index PDF / Word documents; text/markdown/CSV work
 # without them. Missing parsers cause those file types to be skipped

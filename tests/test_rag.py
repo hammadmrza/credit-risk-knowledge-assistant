@@ -256,6 +256,24 @@ def test_generation_off_forces_extractive():
         assert ans.grounded is True and ans.sources
 
 
+def test_embedding_backends_resolve_correctly():
+    import os
+    from src.rag.embeddings import Embedder
+    # Forced local (tests): deterministic, offline, lexical signature.
+    e = Embedder(prefer_ollama=False)
+    assert e.backend == "local"
+    assert e.signature.startswith("local-hash:")
+
+    # Voyage requested but no key → falls back to local, no crash/import error.
+    prev = os.environ.pop("VOYAGE_API_KEY", None)
+    try:
+        e2 = Embedder(prefer_ollama=True, provider="voyage")
+        assert e2.backend == "local"     # no key → graceful fallback
+    finally:
+        if prev is not None:
+            os.environ["VOYAGE_API_KEY"] = prev
+
+
 def test_anthropic_generation_skipped_without_key():
     import os
     from src.rag.pipeline import RAGPipeline as RP

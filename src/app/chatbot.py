@@ -176,11 +176,14 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     c1.metric("Passages", status["num_chunks"])
     c2.metric("Documents", status["num_sources"])
-    if status["embedding_backend"] == "ollama":
+    _eb = status["embedding_backend"]
+    if _eb == "ollama":
         st.caption("Search: semantic (Ollama embeddings)")
+    elif _eb == "voyage":
+        st.caption("Search: semantic (Voyage cloud embeddings)")
     else:
-        st.caption("Search: keyword (local). Ollama + `nomic-embed-text` "
-                   "enables semantic search.")
+        st.caption("Search: keyword (local). Run Ollama or set VOYAGE_API_KEY "
+                   "for meaning-based search.")
 
     if st.button("🔄 (Re)load sample documents", use_container_width=True):
         with st.spinner("Indexing…"):
