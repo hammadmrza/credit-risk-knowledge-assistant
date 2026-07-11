@@ -186,6 +186,30 @@ def test_audit_log_written():
         assert events[-1]["question"] == "what is the dti cap"
 
 
+# ── BM25 local retrieval ─────────────────────────────────────────
+
+def test_bm25_retrieves_content_and_refuses_offtopic():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        pad = lambda s: (s + " ") * 40
+        (root / "reg.md").write_text(
+            "# Regulatory\n\n"
+            f"## Basel III\n\n{pad('Basel III requires an 8 percent capital adequacy ratio.')}\n\n"
+            f"## IFRS 9\n\n{pad('IFRS 9 stages expected credit loss into Stage 1, 2 and 3.')}\n",
+            encoding="utf-8")
+        idx = root / "index.json"
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="off")
+        rag.ingest_dir(root)
+
+        # Concept query with matching content terms → retrieves the passage.
+        hits = rag.retrieve("what capital does Basel III require", top_k=3)
+        assert hits and "8 percent" in " ".join(h.text for h in hits)
+
+        # Off-topic (no shared content terms) → nothing → honest refusal.
+        assert rag.retrieve("how do I bake sourdough bread", top_k=3) == []
+
+
 # ── document viewer (full text stored + persisted) ───────────────
 
 def test_document_text_stored_and_persisted():

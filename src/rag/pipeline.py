@@ -173,6 +173,8 @@ class RAGPipeline:
         self.embedder = Embedder(prefer_ollama=prefer_ollama)
         self.store = VectorStore.load(self.index_path)
         self.generation = generation or getattr(config, "GENERATION_PROVIDER", "auto")
+        self._bm25 = None            # lazily built for local keyword retrieval
+        self._bm25_n = -1
         audit_enabled = getattr(config, "AUDIT_ENABLED", True) if audit is None else audit
         self.audit = AuditLog(getattr(config, "AUDIT_LOG_PATH",
                                       self.index_path.parent / "audit_log.jsonl"),
@@ -266,11 +268,19 @@ class RAGPipeline:
 
     def retrieve(self, question: str, top_k: Optional[int] = None,
                  min_score: Optional[float] = None) -> List[RetrievedChunk]:
-        """Return the most relevant chunks for a question."""
+        """Return the most relevant chunks for a question.
+
+        Local (no Ollama/Voyage) uses BM25 keyword ranking; the semantic
+        backends use embedding cosine similarity.
+        """
         top_k = top_k or config.RAG_TOP_K
         min_score = config.RAG_MIN_SCORE if min_score is None else min_score
         if not len(self.store):
             return []
+
+        if self.embedder.backend == "local":
+            return self._bm25_retrieve(question, top_k)
+
         qvec = self.embedder.embed(question, is_query=True)
         hits = self.store.search(qvec, top_k=top_k)
         out = []
@@ -279,6 +289,31 @@ class RAGPipeline:
                 continue
             out.append(RetrievedChunk(
                 source=rec.source, text=rec.text, score=round(score, 4),
+                breadcrumb=rec.meta.get("breadcrumb", ""),
+                version=self.store.source_version(rec.source)))
+        return out
+
+    def _ensure_bm25(self) -> None:
+        if self._bm25 is None or self._bm25_n != len(self.store):
+            from src.rag.bm25 import BM25
+            self._bm25 = BM25([r.text for r in self.store.records])
+            self._bm25_n = len(self.store)
+
+    def _bm25_retrieve(self, question: str, top_k: int) -> List[RetrievedChunk]:
+        """Keyword retrieval via BM25. Empty result → the query shares no
+        terms with any passage, which the caller turns into an honest refusal."""
+        self._ensure_bm25()
+        scores = self._bm25.scores(question)
+        order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        top = scores[order[0]] if order else 0.0
+        out = []
+        for i in order[:top_k]:
+            if scores[i] <= 0:
+                break
+            rec = self.store.records[i]
+            out.append(RetrievedChunk(
+                source=rec.source, text=rec.text,
+                score=round(scores[i] / top, 4) if top > 0 else 0.0,
                 breadcrumb=rec.meta.get("breadcrumb", ""),
                 version=self.store.source_version(rec.source)))
         return out
