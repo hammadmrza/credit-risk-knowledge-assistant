@@ -298,7 +298,16 @@ class RAGPipeline:
     def _ensure_bm25(self) -> None:
         if self._bm25 is None or self._bm25_n != len(self.store):
             from src.rag.bm25 import BM25
-            self._bm25 = BM25([r.text for r in self.store.records])
+            # Heading boost (standard IR "title" weighting): repeat each chunk's
+            # section breadcrumb so terms in the heading count more. This lifts
+            # the passage whose *section* is about the query (e.g. the "Features
+            # Used" section for a "what features…" question) above passages that
+            # merely mention the common query words in passing.
+            docs = []
+            for r in self.store.records:
+                head = r.meta.get("breadcrumb", "")
+                docs.append((head + " ") * 3 + r.text if head else r.text)
+            self._bm25 = BM25(docs)
             self._bm25_n = len(self.store)
 
     def _bm25_retrieve(self, question: str, top_k: int) -> List[RetrievedChunk]:

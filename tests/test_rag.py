@@ -382,18 +382,22 @@ def test_retrieval_battery_over_seed_corpus():
 
 def _run_retrieval_battery(rag):
 
-    # (question, a string the correct top-k passage must contain)
+    # (question, a specific string from the *answer section* — strict enough
+    # that a merely topic-adjacent passage does not pass).
     battery = [
-        ("What triggers a fraud decline?", "fraud"),
-        ("What is the maximum DTI?", "50%"),
-        ("What is the DTI cap for unsecured loans?", "50%"),
+        ("What triggers a fraud decline?", "DECLINE_FRAUD"),
+        ("What is the maximum DTI?", "DTI > 50%"),
+        ("What is the DTI cap for unsecured loans?", "DTI > 50%"),
         ("What are the risk tiers and their cutoffs?", "720"),
-        ("Tell me about Risk Appetite", "appetite"),
-        ("What are the hard policy rules?", "P-0"),
+        ("Tell me about Risk Appetite", "2. Risk Appetite"),
+        ("What are the hard policy rules?", "P-02"),
         ("What is the minimum credit score to be approved?", "500"),
         ("What is the maximum LTV for a HELOC?", "90%"),
         ("What are the adverse action reason codes?", "AA-"),
         ("Tell me about C tier auto approval", "Auto-approve"),
+        ("What model type is used, and how was it trained?", "XGBoost"),
+        ("What features does the PD model use?", "Features Used"),
+        ("What fairness testing was done on the model?", "Fairness"),
     ]
     failures = []
     for q, needle in battery:

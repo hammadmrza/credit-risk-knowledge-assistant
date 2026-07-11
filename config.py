@@ -41,7 +41,8 @@ VOYAGE_MODEL      = "voyage-3"            # Voyage cloud embedding model
 RAG_EMBED_DIM     = 512      # dimension of the local fallback embedding
 RAG_CHUNK_SIZE    = 1_000    # target characters per chunk
 RAG_CHUNK_OVERLAP = 150      # character overlap between adjacent chunks
-RAG_TOP_K         = 5        # chunks retrieved per query
+RAG_TOP_K         = 8        # chunks retrieved per query (more context for the
+                             # generator; it ignores the irrelevant ones)
 RAG_MIN_SCORE     = 0.15     # cosine floor — below this, treat as "no match"
 RAG_MAX_CONTEXT   = 6_000    # max characters of context sent to the LLM
 
@@ -49,7 +50,7 @@ RAG_MAX_CONTEXT   = 6_000    # max characters of context sent to the LLM
 # index should be rebuilt. On a hosted deploy the index is persisted; the app
 # auto-reingests the seed corpus when the stored build version differs from
 # this one, so a code update never silently serves a stale index.
-INDEX_BUILD_VERSION = "2024.1-bm25-synonyms"
+INDEX_BUILD_VERSION = "2024.2-bm25-heading-boost"
 
 # ── Answer generation provider ───────────────────────────────────
 # Which LLM writes the final answer from the retrieved passages:
