@@ -19,6 +19,7 @@ Run:
 """
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -70,6 +71,80 @@ EXAMPLE_QUESTIONS = [
     "What are the scorecard risk tiers and their score cutoffs?",
     "What human oversight is required before a decline?",
 ]
+
+# Plain-language glossary of common credit-risk terms. Only entries whose term
+# actually appears in the loaded documents are shown (see matched_glossary), so
+# the glossary stays honest for any corpus — it never defines something the
+# documents don't use. Each entry: (display term, detection regex, definition).
+GLOSSARY = [
+    ("PD — Probability of Default", r"\bPD\b|probabilit(?:y|ies) of default",
+     "The chance a borrower fails to repay over a set period (usually 12 "
+     "months). Higher PD means higher risk."),
+    ("LGD — Loss Given Default", r"\bLGD\b|loss given default",
+     "The share of the money you'd actually lose if a borrower defaults, after "
+     "any recoveries or collateral."),
+    ("EAD — Exposure at Default", r"\bEAD\b|exposure at default",
+     "How much is owed at the moment of default — the amount actually at risk."),
+    ("DTI — Debt-to-Income", r"\bDTI\b|debt[- ]to[- ]income",
+     "Monthly debt payments as a share of income. A core affordability check; "
+     "above the policy cap it triggers a decline."),
+    ("TDS / GDS — Debt-service ratios", r"\bTDS\b|\bGDS\b|debt service",
+     "Canadian affordability ratios — GDS covers housing costs, TDS covers all "
+     "debt, each as a share of income. Close cousins of DTI."),
+    ("LTV — Loan-to-Value", r"\bLTV\b|loan[- ]to[- ]value",
+     "The loan amount divided by the value of the collateral (e.g. a home). "
+     "Higher LTV means less cushion and more risk."),
+    ("Basel III", r"basel\s*(?:iii|3)",
+     "The international framework setting how much capital a lender must hold "
+     "against its risks."),
+    ("IFRS 9", r"ifrs\s*9",
+     "The accounting standard that makes lenders reserve for *expected* future "
+     "credit losses, not just losses already incurred."),
+    ("ECL — Expected Credit Loss", r"\bECL\b|expected credit loss",
+     "The reserve a lender books for likely future losses — roughly PD × LGD × "
+     "EAD."),
+    ("Scorecard", r"scorecard",
+     "A points-based model that ranks applicants by risk (here, 300–850). A "
+     "higher score means lower risk."),
+    ("Risk tier", r"risk tier|tier\s*[A-E]\b",
+     "Letter grades (A–E here) that bucket applicants by score band, used for "
+     "pricing and decisions."),
+    ("WoE / IV", r"\bWoE\b|weight of evidence|information value|\bIV\b",
+     "Weight of Evidence and Information Value — statistics used to build and "
+     "sanity-check scorecard features."),
+    ("SHAP", r"\bSHAP\b",
+     "An explainability method showing how much each factor pushed a decision "
+     "up or down — used to produce adverse-action reasons."),
+    ("Adverse action", r"adverse action",
+     "The notice and reasons a lender must give when it declines someone — a "
+     "fair-lending requirement."),
+    ("OSFI / E-23", r"\bOSFI\b|E-?23",
+     "OSFI is Canada's federal banking regulator; its Guideline E-23 sets "
+     "expectations for managing model risk."),
+    ("PIT / TTC", r"\bPIT\b|\bTTC\b|point[- ]in[- ]time|through[- ]the[- ]cycle",
+     "Point-in-Time vs Through-the-Cycle — whether a risk estimate reflects "
+     "today's conditions or a long-run average."),
+    ("Override", r"\boverride\b",
+     "A manual reversal of the system's decision by an authorised analyst, "
+     "recorded with a reason."),
+]
+
+
+def matched_glossary(corpus_text: str):
+    """Glossary entries whose term actually appears in the loaded documents."""
+    return [(term, defn) for term, pat, defn in GLOSSARY
+            if re.search(pat, corpus_text, re.IGNORECASE)]
+
+
+def topic_chips(topics, key_prefix):
+    """Render clickable topic buttons; return the clicked question or None."""
+    clicked = None
+    cols = st.columns(2)
+    for i, t in enumerate(topics):
+        if cols[i % 2].button(f"📄 {t}", use_container_width=True,
+                              key=f"{key_prefix}{i}"):
+            clicked = f"What does the documentation say about {t}?"
+    return clicked
 
 
 def open_document(source: str):
@@ -251,9 +326,15 @@ if _pending_doc and _pending_doc in docs:
     st.session_state["doc_reader_sel"] = _pending_doc
     st.session_state["_jumped_to_doc"] = _pending_doc
 
-# Three orientation panels as tabs (cleaner than stacked expanders).
-_tab_about, _tab_ask, _tab_docs = st.tabs(
-    ["ℹ️ About", "📋 What can I ask?", "📄 Documents"])
+# Full corpus text, for glossary term-detection (small corpus, cheap to build).
+_corpus_text = "\n".join(rag.document_text(s) or "" for s in docs)
+
+# The conversation lives in its own tab; the rest are reference panels, so the
+# chat page stays clean instead of sharing a scroll with the About text.
+(_tab_chat, _tab_about, _tab_ask, _tab_strength,
+ _tab_glossary, _tab_docs) = st.tabs(
+    ["💬 Chat", "ℹ️ About", "📋 What can I ask?", "✅ Strengths & limits",
+     "📖 Glossary", "📄 Documents"])
 
 with _tab_about:
     st.markdown(
@@ -293,6 +374,79 @@ with _tab_ask:
         st.markdown(f"**{d['title']}**  \n<span style='color:#666'>{secs}</span>",
                     unsafe_allow_html=True)
 
+with _tab_strength:
+    st.caption("What this assistant does well, and where it's limited — shown "
+               "for its **current setup**, so you always know what you're "
+               "getting. Being explicit about limits is deliberate: for model "
+               "risk (e.g. OSFI E-23), a documented boundary is a strength, "
+               "not a weakness.")
+
+    semantic_on = _eb in ("ollama", "voyage")
+    ai_on = has_key and provider in ("auto", "anthropic")
+
+    st.markdown("#### ✅ Where it excels")
+    st.markdown(
+        "- **Grounded & cited** — every answer is drawn only from your "
+        "documents, with clickable sources you can open and verify.\n"
+        "- **Won't make things up** — if the documents don't cover a question, "
+        "it says so instead of guessing.\n"
+        "- **Auditable** — every question, answer, and cited source (with the "
+        "document's version) is written to an audit trail.\n"
+        "- **Finds the right passage** — keyword ranking (BM25) reliably "
+        "surfaces the section that contains your terms.")
+
+    st.markdown("#### ⚠️ Where it needs care (this setup)")
+
+    # Search mode — flips to a green ✓ once semantic search is on.
+    if semantic_on:
+        st.success(f"**Search: semantic ({_eb}).** Matches by meaning, so "
+                   "synonyms like *TDS* vs *DTI* are handled.")
+    else:
+        st.warning("**Search: keyword only (local).** Matches words, not "
+                   "meaning — it can miss synonyms (e.g. *TDS* vs *DTI*) or "
+                   "an unfamiliar acronym.  \n*Fix:* run Ollama, or set a "
+                   "Voyage API key, for meaning-based search.")
+
+    # Answer mode — reflects the engine actually in effect.
+    if ai_on:
+        st.success("**Answers: written by Claude.** Polished plain-language "
+                   "prose on top of the cited sources.")
+    elif provider == "ollama":
+        st.info("**Answers: local Ollama** when it's running, otherwise the "
+                "quoted passages below.")
+    elif provider == "off":
+        st.info("**Answers: quoted passages only** (you picked *No AI*). Real, "
+                "cited text — occasionally clipped, never invented.")
+    else:
+        st.warning("**Answers: quoted passages** (no Claude key set). Real "
+                   "cited text, but sometimes choppy and not woven together "
+                   "across documents.  \n*Fix:* paste a Claude API key in the "
+                   "sidebar for written answers.")
+
+    # Always-true boundaries.
+    st.markdown(
+        "- **Knows only what's loaded** — the documents in the sidebar, and "
+        "nothing outside them (no web, no live systems).\n"
+        "- **Not legal or credit advice** — it reports what your documents "
+        "say; a qualified person still makes the decision.\n"
+        "- **Answers are as-of dated** — they reflect the document versions "
+        "shown; re-ingest after a policy update to stay current.")
+
+with _tab_glossary:
+    st.caption("Plain-language definitions of terms that appear in your "
+               "documents — so anyone can follow the answers, whatever their "
+               "credit-risk background. Only terms actually used in the loaded "
+               "documents are listed.")
+    _hits = matched_glossary(_corpus_text)
+    if not _hits:
+        st.info("No known glossary terms were detected in the current "
+                "documents.")
+    else:
+        for term, defn in _hits:
+            st.markdown(
+                f"**{term}**  \n<span style='color:#666'>{defn}</span>",
+                unsafe_allow_html=True)
+
 with _tab_docs:
     _jumped = st.session_state.pop("_jumped_to_doc", None)
     if _jumped:
@@ -314,65 +468,58 @@ with _tab_docs:
         else:
             st.text(text)
 
-# ── Chat history ─────────────────────────────────────────────────
-for turn_i, turn in enumerate(st.session_state.history):
-    with st.chat_message(turn["role"]):
-        st.markdown(turn["content"])
-        ans = turn.get("answer")
-        if ans is not None:
-            render_sources(ans, key_prefix=str(turn_i))
-            label = BACKEND_LABEL.get(ans.backend, "")
-            if label:
-                st.caption(label)
+# ── 💬 Chat tab — the actual conversation, on its own page ───────
+with _tab_chat:
+    # Chat history
+    for turn_i, turn in enumerate(st.session_state.history):
+        with st.chat_message(turn["role"]):
+            st.markdown(turn["content"])
+            ans = turn.get("answer")
+            if ans is not None:
+                render_sources(ans, key_prefix=str(turn_i))
+                label = BACKEND_LABEL.get(ans.backend, "")
+                if label:
+                    st.caption(label)
 
+    pending = None
 
-def topic_chips(topics, key_prefix):
-    """Render clickable topic buttons; return the clicked question or None."""
-    clicked = None
-    cols = st.columns(2)
-    for i, t in enumerate(topics):
-        if cols[i % 2].button(f"📄 {t}", use_container_width=True,
-                              key=f"{key_prefix}{i}"):
-            clicked = f"What does the documentation say about {t}?"
-    return clicked
+    # Empty-state coaching (ChatGPT/Claude style): specific examples + topics.
+    if first_visit:
+        st.markdown("👋 **Ask a question to get started** — or tap an example:")
+        cols = st.columns(2)
+        for i, ex in enumerate(EXAMPLE_QUESTIONS):
+            if cols[i % 2].button(ex, use_container_width=True, key=f"ex{i}"):
+                pending = ex
+        if topic_list:
+            st.markdown("**…or explore a topic:**")
+            pending = topic_chips(topic_list[:6], "topic_") or pending
+        st.caption("New here? The **ℹ️ About**, **📋 What can I ask?** and "
+                   "**📖 Glossary** tabs above explain what this can do.")
 
+    # Helpful redirect after a "not found" answer — turn dead-ends into guidance.
+    elif st.session_state.history:
+        last = st.session_state.history[-1]
+        last_ans = last.get("answer")
+        if last_ans is not None and not last_ans.grounded and topic_list:
+            st.markdown("**Not sure what to ask? I can help with topics like:**")
+            pending = topic_chips(topic_list[:6], "retry_") or pending
 
-pending = None
+    # Input
+    typed = st.chat_input(
+        "Ask about a policy, procedure, model, or compliance rule…")
+    question = typed or pending
 
-# Empty-state coaching (ChatGPT/Claude style): specific examples + topics.
-if first_visit:
-    st.markdown("**Try a specific question:**")
-    cols = st.columns(2)
-    for i, ex in enumerate(EXAMPLE_QUESTIONS):
-        if cols[i % 2].button(ex, use_container_width=True, key=f"ex{i}"):
-            pending = ex
-    if topic_list:
-        st.markdown("**…or explore a topic:**")
-        pending = topic_chips(topic_list[:6], "topic_") or pending
-
-# Helpful redirect after a "not found" answer — turn dead-ends into guidance.
-elif st.session_state.history:
-    last = st.session_state.history[-1]
-    last_ans = last.get("answer")
-    if last_ans is not None and not last_ans.grounded and topic_list:
-        st.markdown("**Not sure what to ask? I can help with topics like:**")
-        pending = topic_chips(topic_list[:6], "retry_") or pending
-
-# ── Input ────────────────────────────────────────────────────────
-typed = st.chat_input("Ask about a policy, procedure, model, or compliance rule…")
-question = typed or pending
-
-if question:
-    st.session_state.history.append({"role": "user", "content": question})
-    with st.spinner("Searching your documents…"):
-        ans = rag.query(question)
-    if ans.grounded:
-        content = ans.text
-    else:
-        # Friendlier refusal that points back to the corpus scope.
-        hint = (" I can only answer from the loaded documents — try a topic "
-                "from **📋 What can I ask about?** above.") if topic_list else ""
-        content = f":orange[{ans.text}]{hint}"
-    st.session_state.history.append(
-        {"role": "assistant", "content": content, "answer": ans})
-    st.rerun()
+    if question:
+        st.session_state.history.append({"role": "user", "content": question})
+        with st.spinner("Searching your documents…"):
+            ans = rag.query(question)
+        if ans.grounded:
+            content = ans.text
+        else:
+            # Friendlier refusal that points back to the corpus scope.
+            hint = (" I can only answer from the loaded documents — try the "
+                    "**📋 What can I ask?** tab.") if topic_list else ""
+            content = f":orange[{ans.text}]{hint}"
+        st.session_state.history.append(
+            {"role": "assistant", "content": content, "answer": ans})
+        st.rerun()
