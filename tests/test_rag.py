@@ -364,6 +364,45 @@ def test_loaders_skip_unsupported_and_read_csv():
         assert "x: 1" in csv_doc.text
 
 
+# ── retrieval battery over the real seed corpus ──────────────────
+
+def test_retrieval_battery_over_seed_corpus():
+    """A broad set of realistic questions must each retrieve a passage that
+    actually contains the answer. This is the guard against 'I have to check
+    every question by hand' — a phrasing/retrieval regression fails here
+    instead of surfacing live. Uses the shipped knowledge/ corpus."""
+    import config
+    with tempfile.TemporaryDirectory() as d:
+        idx = Path(d) / "index.json"
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False,
+                          audit=False, generation="off")
+        rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
+        _run_retrieval_battery(rag)
+
+
+def _run_retrieval_battery(rag):
+
+    # (question, a string the correct top-k passage must contain)
+    battery = [
+        ("What triggers a fraud decline?", "fraud"),
+        ("What is the maximum DTI?", "50%"),
+        ("What is the DTI cap for unsecured loans?", "50%"),
+        ("What are the risk tiers and their cutoffs?", "720"),
+        ("Tell me about Risk Appetite", "appetite"),
+        ("What are the hard policy rules?", "P-0"),
+        ("What is the minimum credit score to be approved?", "500"),
+        ("What is the maximum LTV for a HELOC?", "90%"),
+        ("What are the adverse action reason codes?", "AA-"),
+        ("Tell me about C tier auto approval", "Auto-approve"),
+    ]
+    failures = []
+    for q, needle in battery:
+        chunks = rag.retrieve(q)
+        if not any(needle.lower() in c.text.lower() for c in chunks):
+            failures.append(q)
+    assert not failures, f"retrieval battery misses: {failures}"
+
+
 # ── simple runner (no pytest needed) ─────────────────────────────
 
 if __name__ == "__main__":

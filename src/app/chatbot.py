@@ -137,13 +137,20 @@ def matched_glossary(corpus_text: str):
 
 
 def topic_chips(topics, key_prefix):
-    """Render clickable topic buttons; return the clicked question or None."""
+    """Render clickable topic buttons; return the clicked question or None.
+
+    The generated query is just "Tell me about {topic}" — a plain phrasing
+    whose only content words are the topic itself. An earlier template ("What
+    does the documentation say about {topic}?") injected the word
+    "documentation", which polluted keyword retrieval by pulling in
+    Document-Control / Product-Guide passages ahead of the actual section.
+    """
     clicked = None
     cols = st.columns(2)
     for i, t in enumerate(topics):
         if cols[i % 2].button(f"📄 {t}", use_container_width=True,
                               key=f"{key_prefix}{i}"):
-            clicked = f"What does the documentation say about {t}?"
+            clicked = f"Tell me about {t}"
     return clicked
 
 
