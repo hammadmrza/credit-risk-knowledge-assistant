@@ -409,19 +409,106 @@ class RAGPipeline:
                 return text, p
         return None, None
 
-    def _extractive_answer(self, chunks: List[RetrievedChunk]) -> str:
-        """LLM-free answer: stitch the top passages together with citations."""
-        lines = [
-            "No answer-generation model is available, so here are the most "
-            "relevant passages from the knowledge base (no generated summary). "
-            "Set ANTHROPIC_API_KEY or run Ollama to get written answers:",
-            "",
-        ]
-        for i, c in enumerate(chunks, 1):
-            body = c.text.split("]\n", 1)[-1].strip()  # drop the header line
-            snippet = body[:600] + ("…" if len(body) > 600 else "")
-            lines.append(f"[{i}] {c.citation}\n{snippet}\n")
-        return "\n".join(lines).strip()
+    def _extractive_answer(self, question: str, chunks: List[RetrievedChunk]) -> str:
+        """LLM-free answer that still reads cleanly.
+
+        Instead of dumping raw passages, we pull the few sentences across the
+        top passages that best match the question and present them as a short,
+        quoted answer. No model, fully deterministic, and every sentence is
+        verbatim from a source — so it's trustworthy *and* tidy.
+        """
+        import re
+        from src.rag.bm25 import content_tokens
+
+        q_terms = set(content_tokens(question))
+        scored = []  # (score, order, sentence, citation)
+        order = 0
+        for c in chunks[:3]:                      # top passages only
+            body = c.text.split("]\n", 1)[-1].strip()
+            for sent in self._split_sentences(body):
+                s_terms = content_tokens(sent)
+                if not s_terms:
+                    continue
+                overlap = sum(1 for t in s_terms if t in q_terms)
+                if not overlap:
+                    continue
+                # A sentence that ends in real terminal punctuation reads as a
+                # complete thought; a clipped fragment doesn't. Reward the
+                # former so whole sentences win over mid-wrap scraps.
+                complete = bool(re.search(r"[.!?%)\]\d]$", sent))
+                score = (overlap * (1.0 if complete else 0.55)
+                         / (1 + 0.15 * order))
+                if not complete:                  # signal the clip to the reader
+                    sent = sent.rstrip(" ·,;:") + "…"
+                scored.append((score, order, sent, c.citation, complete))
+                order += 1
+
+        if not scored:
+            # Nothing matched at the sentence level — fall back to the single
+            # most-relevant passage, trimmed, rather than an empty answer.
+            top = chunks[0]
+            body = top.text.split("]\n", 1)[-1].strip()
+            snippet = body[:500] + ("…" if len(body) > 500 else "")
+            return (f"Here's the most relevant passage:\n\n> {snippet}\n\n"
+                    f"— {top.citation}")
+
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        # Dedupe near-identical sentences (same first 40 chars), keep top 3.
+        picked, seen = [], set()
+        for item in scored:
+            key = item[2][:40].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            picked.append(item)
+            if len(picked) == 3:
+                break
+        picked.sort(key=lambda x: x[1])           # restore reading order
+
+        lines = ["Based on your documents:\n"]
+        for _, _, sent, cite, _ in picked:
+            lines.append(f"- {sent}  \n  <sup>— {cite}</sup>")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _split_sentences(text: str) -> List[str]:
+        """Sentence splitter + markdown scrub that rejoins hard-wrapped lines.
+
+        Markdown source often hard-wraps one sentence across several physical
+        lines; naively splitting on newlines shreds it into fragments. We scrub
+        each line, merge a line into the previous one when the previous didn't
+        end in terminal punctuation and this one continues it (starts
+        lowercase), then split the rejoined text into sentences.
+        """
+        import re
+
+        # 1. Scrub each physical line (strip bold, table pipes, bullet markers).
+        raw = []
+        for ln in text.split("\n"):
+            ln = ln.replace("**", "").replace("`", "")
+            ln = re.sub(r"\s*\|\s*", " · ", ln)          # table cells → middots
+            ln = re.sub(r"^[\s\-•*·>#]+", "", ln)        # leading list/heading marks
+            ln = re.sub(r"\s{2,}", " ", ln).strip(" ·")
+            if ln and not re.fullmatch(r"[-=_·:\s]+", ln):  # drop rule lines
+                raw.append(ln)
+
+        # 2. Rejoin wrapped continuations into whole sentences.
+        merged: List[str] = []
+        for ln in raw:
+            if (merged and not re.search(r"[.!?:%)\]\d]$", merged[-1])
+                    and ln[:1].islower()):
+                merged[-1] = merged[-1] + " " + ln
+            else:
+                merged.append(ln)
+
+        # 3. Split each merged unit into sentences on terminal punctuation.
+        out = []
+        for m in merged:
+            for s in re.split(r"(?<=[.!?])\s+", m):
+                s = re.sub(r"^[\s\-•*·:]+|[\s·]+$", "", s)
+                if len(s) >= 20 and not re.fullmatch(r"[\-:·\s]+", s):
+                    out.append(s)
+        return out
 
     def query(self, question: str, top_k: Optional[int] = None,
               min_score: Optional[float] = None,
@@ -451,8 +538,8 @@ class RAGPipeline:
                          backend=backend)
         else:
             # No LLM available → extractive fallback (retrieval still works).
-            ans = Answer(text=self._extractive_answer(chunks), sources=chunks,
-                         grounded=True, backend="extractive")
+            ans = Answer(text=self._extractive_answer(question, chunks),
+                         sources=chunks, grounded=True, backend="extractive")
         self._audit(question, ans, user)
         return ans
 

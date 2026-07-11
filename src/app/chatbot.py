@@ -73,14 +73,14 @@ EXAMPLE_QUESTIONS = [
 
 
 def open_document(source: str):
-    """Point the document reader at a source and expand it.
+    """Point the document reader (in the 📄 Documents tab) at a source.
 
     Writes a *non-widget* key (`pending_doc`); the reader applies it to the
     selectbox before that widget is instantiated — Streamlit forbids setting
-    a widget-keyed value after the widget exists.
+    a widget-keyed value after the widget exists. Streamlit can't switch tabs
+    programmatically, so we also set a flag to show a "opened below" hint.
     """
     st.session_state["pending_doc"] = source
-    st.session_state["open_reader"] = True
     st.rerun()
 
 
@@ -99,7 +99,7 @@ def render_sources(ans, key_prefix=""):
             st.caption(body[:800] + ("…" if len(body) > 800 else ""))
             if s.source not in seen:      # one "open" button per document
                 seen.add(s.source)
-                if st.button(f"📖 Read all of {s.source}",
+                if st.button(f"📖 Open {s.source} in the 📄 Documents tab",
                              key=f"open_{key_prefix}_{i}"):
                     open_document(s.source)
 
@@ -223,11 +223,39 @@ with st.sidebar:
             st.session_state.history = []
             st.rerun()
 
-# ── "What is this?" explainer ────────────────────────────────────
+# ── Orientation ──────────────────────────────────────────────────
 st.session_state.setdefault("history", [])
 first_visit = not st.session_state.history
 
-with st.expander("ℹ️  What is this, and how do I use it?", expanded=first_visit):
+# ── Empty knowledge base — auto-load the seed docs on first run ──
+if status["num_chunks"] == 0:
+    seed_files = [p for p in Path(config.KNOWLEDGE_DIR).glob("*") if p.is_file()]
+    if seed_files and not st.session_state.get("_auto_ingested"):
+        st.session_state["_auto_ingested"] = True   # guard against a loop
+        with st.spinner("Preparing the knowledge base…"):
+            rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
+        st.rerun()
+    st.warning("Your knowledge base is empty. Add a document in the sidebar "
+               "to get started.")
+    st.stop()
+
+outline = rag.outline()
+topic_list = rag.topics(limit=8)
+docs = status["sources"]
+
+# Apply a pending "open this document" request before the reader selectbox
+# exists (a Sources card was clicked). Streamlit can't switch tabs for us, so
+# flag it to show an "opened below" hint inside the Documents tab.
+_pending_doc = st.session_state.pop("pending_doc", None)
+if _pending_doc and _pending_doc in docs:
+    st.session_state["doc_reader_sel"] = _pending_doc
+    st.session_state["_jumped_to_doc"] = _pending_doc
+
+# Three orientation panels as tabs (cleaner than stacked expanders).
+_tab_about, _tab_ask, _tab_docs = st.tabs(
+    ["ℹ️ About", "📋 What can I ask?", "📄 Documents"])
+
+with _tab_about:
     st.markdown(
         """
 **What it is** — a private assistant that answers questions using **your own
@@ -257,23 +285,7 @@ where each fact came from**, so you can trust and verify it.
         """
     )
 
-# ── Empty knowledge base — auto-load the seed docs on first run ──
-if status["num_chunks"] == 0:
-    seed_files = [p for p in Path(config.KNOWLEDGE_DIR).glob("*") if p.is_file()]
-    if seed_files and not st.session_state.get("_auto_ingested"):
-        st.session_state["_auto_ingested"] = True   # guard against a loop
-        with st.spinner("Preparing the knowledge base…"):
-            rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
-        st.rerun()
-    st.warning("Your knowledge base is empty. Add a document in the sidebar "
-               "to get started.")
-    st.stop()
-
-# ── "What can I ask about?" — derived from the loaded documents ───
-outline = rag.outline()
-topic_list = rag.topics(limit=8)
-
-with st.expander("📋  What can I ask about?", expanded=first_visit):
+with _tab_ask:
     st.caption("This assistant answers only from the documents below — here's "
                "what each one covers:")
     for d in outline:
@@ -281,14 +293,10 @@ with st.expander("📋  What can I ask about?", expanded=first_visit):
         st.markdown(f"**{d['title']}**  \n<span style='color:#666'>{secs}</span>",
                     unsafe_allow_html=True)
 
-# ── Document reader — read any source in full to verify answers ──
-docs = status["sources"]
-# Apply a pending "open this document" request before the selectbox exists.
-_pending_doc = st.session_state.pop("pending_doc", None)
-if _pending_doc and _pending_doc in docs:
-    st.session_state["doc_reader_sel"] = _pending_doc
-with st.expander("📄  Read the source documents (verify answers yourself)",
-                 expanded=st.session_state.pop("open_reader", False)):
+with _tab_docs:
+    _jumped = st.session_state.pop("_jumped_to_doc", None)
+    if _jumped:
+        st.success(f"Opened **{_jumped}** below.")
     st.caption("Read a whole document top-to-bottom and check the assistant's "
                "answers against the original — this is grounded RAG: every "
                "answer traces back to text you can see here.")
