@@ -232,6 +232,18 @@ if status["num_chunks"] == 0:
                "documents** in the sidebar to get started, or upload your own.")
     st.stop()
 
+# ── "What can I ask about?" — derived from the loaded documents ───
+outline = rag.outline()
+topic_list = rag.topics(limit=8)
+
+with st.expander("📋  What can I ask about?", expanded=first_visit):
+    st.caption("This assistant answers only from the documents below — here's "
+               "what each one covers:")
+    for d in outline:
+        secs = " · ".join(d["sections"]) if d["sections"] else "—"
+        st.markdown(f"**{d['title']}**  \n<span style='color:#666'>{secs}</span>",
+                    unsafe_allow_html=True)
+
 # ── Chat history ─────────────────────────────────────────────────
 for turn in st.session_state.history:
     with st.chat_message(turn["role"]):
@@ -243,14 +255,38 @@ for turn in st.session_state.history:
             if label:
                 st.caption(label)
 
-# ── Example questions (empty-state, like ChatGPT/Claude) ─────────
+
+def topic_chips(topics, key_prefix):
+    """Render clickable topic buttons; return the clicked question or None."""
+    clicked = None
+    cols = st.columns(2)
+    for i, t in enumerate(topics):
+        if cols[i % 2].button(f"📄 {t}", use_container_width=True,
+                              key=f"{key_prefix}{i}"):
+            clicked = f"What does the documentation say about {t}?"
+    return clicked
+
+
 pending = None
+
+# Empty-state coaching (ChatGPT/Claude style): specific examples + topics.
 if first_visit:
-    st.markdown("**Try one of these to get started:**")
+    st.markdown("**Try a specific question:**")
     cols = st.columns(2)
     for i, ex in enumerate(EXAMPLE_QUESTIONS):
         if cols[i % 2].button(ex, use_container_width=True, key=f"ex{i}"):
             pending = ex
+    if topic_list:
+        st.markdown("**…or explore a topic:**")
+        pending = topic_chips(topic_list[:6], "topic_") or pending
+
+# Helpful redirect after a "not found" answer — turn dead-ends into guidance.
+elif st.session_state.history:
+    last = st.session_state.history[-1]
+    last_ans = last.get("answer")
+    if last_ans is not None and not last_ans.grounded and topic_list:
+        st.markdown("**Not sure what to ask? I can help with topics like:**")
+        pending = topic_chips(topic_list[:6], "retry_") or pending
 
 # ── Input ────────────────────────────────────────────────────────
 typed = st.chat_input("Ask about a policy, procedure, model, or compliance rule…")
@@ -260,7 +296,13 @@ if question:
     st.session_state.history.append({"role": "user", "content": question})
     with st.spinner("Searching your documents…"):
         ans = rag.query(question)
-    content = ans.text if ans.grounded else f":orange[{ans.text}]"
+    if ans.grounded:
+        content = ans.text
+    else:
+        # Friendlier refusal that points back to the corpus scope.
+        hint = (" I can only answer from the loaded documents — try a topic "
+                "from **📋 What can I ask about?** above.") if topic_list else ""
+        content = f":orange[{ans.text}]{hint}"
     st.session_state.history.append(
         {"role": "assistant", "content": content, "answer": ans})
     st.rerun()

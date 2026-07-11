@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,6 +109,42 @@ _SYSTEM_PROMPT = (
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+_NUM_PREFIX = re.compile(r"^\s*\d+(\.\d+)*\.?\s+")
+
+_TOPIC_STOP = {
+    "overview", "data", "references", "introduction", "summary", "scope",
+    "document control", "system requirements", "purpose and scope",
+    "related documents", "signatures", "review and approval",
+}
+
+
+def _is_noise_topic(sec: str) -> bool:
+    """True for boilerplate section names not worth showing as a topic."""
+    s = (sec or "").lower().strip()
+    if s in _TOPIC_STOP:
+        return True
+    if re.match(r"^step\s+\d+", s):      # "Step 3", "Step 4"…
+        return True
+    if re.match(r"^v(ersion)?[\s\d.]", s):  # "Version 1.1…", "v1.1"
+        return True
+    return len(s) < 5
+
+
+def _clean_topic(text: str) -> str:
+    """Tidy a heading into a readable topic label.
+
+    Strips leading section numbers ("3.3 ") and everything after an em/en
+    dash separator, so "3. Hierarchical Decision Engine" → "Hierarchical
+    Decision Engine" and "Gate 2 — Hard Policy Rules" → "Gate 2".
+    """
+    text = _NUM_PREFIX.sub("", (text or "").strip())
+    for sep in (" — ", " – ", " - "):
+        if sep in text:
+            text = text.split(sep, 1)[0].strip()
+            break
+    return text
 
 
 class RAGPipeline:
@@ -418,3 +455,58 @@ class RAGPipeline:
         if os.getenv("ANTHROPIC_API_KEY"):
             return "anthropic (Claude API)"
         return "ollama (or extractive if offline)"
+
+    # ── orientation (derived from the documents, for any corpus) ─────
+
+    def outline(self, max_sections: int = 6) -> List[dict]:
+        """Per-document orientation, derived from the indexed content.
+
+        Returns a list of {"source", "title", "sections"} where ``title`` is
+        the document's top heading (or filename) and ``sections`` are its main
+        section names. Used by UIs to tell a new user what they can ask about,
+        without hardcoding anything domain-specific — it reflects whatever
+        documents are actually loaded.
+        """
+        per: dict = {}
+        for rec in self.store.records:
+            src = rec.source
+            crumb = rec.meta.get("breadcrumb", "") or ""
+            parts = [p.strip() for p in crumb.split(">") if p.strip()]
+            entry = per.setdefault(src, {"title": None, "sections": [], "seen": set()})
+            if parts:
+                if entry["title"] is None:
+                    entry["title"] = _clean_topic(parts[0])
+                if len(parts) >= 2:
+                    sec = _clean_topic(parts[1])
+                    if sec and sec.lower() not in entry["seen"] \
+                            and len(entry["sections"]) < max_sections:
+                        entry["seen"].add(sec.lower())
+                        entry["sections"].append(sec)
+        out = []
+        for src in self.store.sources():
+            e = per.get(src, {"title": None, "sections": []})
+            title = e["title"] or Path(src).stem.replace("_", " ").title()
+            out.append({"source": src, "title": title, "sections": e["sections"]})
+        return out
+
+    def topics(self, limit: int = 8) -> List[str]:
+        """Meaningful topics across all documents, for chips / refusal hints.
+
+        Filters out boilerplate sections (Overview, Step N, Version…, Document
+        Control) and round-robins across documents so the list shows breadth
+        rather than being dominated by one document.
+        """
+        doc_secs = [[s for s in d["sections"] if not _is_noise_topic(s)]
+                    for d in self.outline()]
+        seen, flat, i = set(), [], 0
+        while len(flat) < limit and any(len(ds) > i for ds in doc_secs):
+            for ds in doc_secs:
+                if len(ds) > i:
+                    k = ds[i].lower()
+                    if k not in seen:
+                        seen.add(k)
+                        flat.append(ds[i])
+                        if len(flat) >= limit:
+                            break
+            i += 1
+        return flat

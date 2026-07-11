@@ -93,6 +93,10 @@ generation on Ollama so no content leaves the machine.
 - **Chatbot UI** (`streamlit run src/app/chatbot.py`) — chat interface with
   expandable source cards (passage, relevance score, document version),
   a knowledge-base status sidebar, and drag-and-drop document ingestion.
+  New users are oriented automatically: a **"What can I ask about?"** panel
+  and clickable **topic chips** are derived from whatever documents are
+  loaded (so they stay accurate for any corpus), a plain-language answer-
+  engine picker, and off-topic questions get redirected to in-scope topics.
 - **REST API** (`uvicorn src.rag.api:app --port 8100`) — `/rag/query`,
   `/rag/ingest/*`, `/rag/status`, `/rag/reset`.
 - **CLI** — `ingest`, `query`, `chat`, `status`.

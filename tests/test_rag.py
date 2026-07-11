@@ -186,6 +186,38 @@ def test_audit_log_written():
         assert events[-1]["question"] == "what is the dti cap"
 
 
+# ── orientation (outline / topics) ───────────────────────────────
+
+def test_outline_and_topics_derive_from_documents():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        # Section bodies are padded so each occupies its own chunk(s) — the
+        # outline reads section names from the stored chunks.
+        pad = lambda s: (s + " ") * 90
+        (root / "policy.md").write_text(
+            "# Company Policy\n\n"
+            f"## 1. Risk Appetite\n\n{pad('Appetite detail.')}\n\n"
+            f"## 2. Decision Engine\n\n{pad('Engine detail.')}\n\n"
+            f"## 3. Overview\n\n{pad('Boilerplate detail.')}\n\n"
+            f"## Step 4\n\n{pad('More boilerplate.')}\n", encoding="utf-8")
+        idx = root / "index.json"
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="off")
+        rag.ingest_dir(root)
+
+        outline = rag.outline()
+        doc = next(o for o in outline if o["source"] == "policy.md")
+        assert doc["title"] == "Company Policy"        # H1, number-stripped
+        assert "Risk Appetite" in doc["sections"]      # H2, number-stripped
+        assert "Decision Engine" in doc["sections"]
+
+        topics = rag.topics(limit=8)
+        assert "Risk Appetite" in topics
+        # boilerplate filtered out of the topic chips
+        assert "Overview" not in topics
+        assert not any(t.lower().startswith("step ") for t in topics)
+
+
 # ── generation provider resolution ───────────────────────────────
 
 def test_generation_off_forces_extractive():
