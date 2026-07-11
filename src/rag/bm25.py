@@ -49,6 +49,27 @@ def content_tokens(text: str) -> List[str]:
     return [t for t in _TOKEN_RE.findall(text.lower()) if t not in _STOP]
 
 
+# Everyday words users type vs. the formal words policy documents use. A person
+# asks for the DTI "cap"; the policy says "Maximum Debt-to-Income". Keyword
+# search can't bridge that on its own, so at query time we ADD the formal
+# synonym as an extra search term (never removing the user's own words). This is
+# a small, general set for threshold/product wording — ordinary queries with
+# none of these words are completely unaffected. It is not a substitute for the
+# semantic backends, which handle synonyms in general (e.g. TDS vs DTI).
+_SYNONYMS = {
+    "cap": "maximum", "caps": "maximum", "ceiling": "maximum",
+    "limit": "maximum", "limits": "maximum", "max": "maximum",
+    "floor": "minimum", "min": "minimum", "minimums": "minimum",
+    "unsecured": "personal",
+}
+
+
+def expand_query(query: str) -> str:
+    """Append formal synonyms for any everyday threshold/product words present."""
+    extra = [_SYNONYMS[t] for t in content_tokens(query) if t in _SYNONYMS]
+    return (query + " " + " ".join(extra)) if extra else query
+
+
 class BM25:
     """Okapi BM25 over a fixed set of documents (passages)."""
 

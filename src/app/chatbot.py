@@ -302,10 +302,19 @@ with st.sidebar:
 st.session_state.setdefault("history", [])
 first_visit = not st.session_state.history
 
-# ── Empty knowledge base — auto-load the seed docs on first run ──
+# ── Knowledge base: seed on first run, and self-heal a stale index ──
+# A hosted deploy persists the index on disk. When a code update changes
+# chunking/retrieval, that saved index would otherwise keep being served —
+# giving wrong "I can't find that" answers. So we rebuild automatically when
+# the stored build version is older than the current one. User-uploaded docs
+# are protected: we only auto-rebuild the *seed-only* corpus; if custom docs
+# are present we show a one-click Rebuild prompt instead of wiping them.
+seed_names = {p.name for p in Path(config.KNOWLEDGE_DIR).glob("*") if p.is_file()}
+_stale = status.get("index_build_version") != status.get("current_build_version")
+_only_seed = bool(status["sources"]) and set(status["sources"]).issubset(seed_names)
+
 if status["num_chunks"] == 0:
-    seed_files = [p for p in Path(config.KNOWLEDGE_DIR).glob("*") if p.is_file()]
-    if seed_files and not st.session_state.get("_auto_ingested"):
+    if seed_names and not st.session_state.get("_auto_ingested"):
         st.session_state["_auto_ingested"] = True   # guard against a loop
         with st.spinner("Preparing the knowledge base…"):
             rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
@@ -313,6 +322,20 @@ if status["num_chunks"] == 0:
     st.warning("Your knowledge base is empty. Add a document in the sidebar "
                "to get started.")
     st.stop()
+elif _stale and _only_seed and not st.session_state.get("_healed_index"):
+    # Stale index built by an older version, seed-only → rebuild silently.
+    st.session_state["_healed_index"] = True
+    with st.spinner("Updating the knowledge base to the latest version…"):
+        rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
+    st.rerun()
+elif _stale and not _only_seed:
+    # Custom docs present — don't wipe them; offer a one-click rebuild.
+    st.warning("This knowledge base was built by an older version. Answers may "
+               "be less accurate until it's rebuilt.")
+    if st.button("🔄 Rebuild index now (re-indexes current documents)"):
+        with st.spinner("Rebuilding…"):
+            rag.ingest_dir(config.KNOWLEDGE_DIR, reset=True)
+        st.rerun()
 
 outline = rag.outline()
 topic_list = rag.topics(limit=8)

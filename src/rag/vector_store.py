@@ -79,6 +79,9 @@ class VectorStore:
     def __init__(self, embedding_signature: str = ""):
         self.records: List[Record] = []
         self.embedding_signature = embedding_signature
+        # Which app build produced this index (see config.INDEX_BUILD_VERSION),
+        # so a hosted deploy can detect and rebuild a stale persisted index.
+        self.build_version = ""
         # Per-source provenance: source -> {ingested_at, sha, chunks}.
         self.manifest: dict = {}
         # Full document text per source, so a UI can show the whole document
@@ -168,6 +171,7 @@ class VectorStore:
         payload = {
             "version": 3,
             "embedding_signature": self.embedding_signature,
+            "build_version": self.build_version,
             "manifest": self.manifest,
             "documents": self.documents,
             "records": [r.to_dict() for r in self.records],
@@ -192,6 +196,7 @@ class VectorStore:
         with open(path, encoding="utf-8") as f:
             payload = json.load(f)
         store.embedding_signature = payload.get("embedding_signature", "")
+        store.build_version = payload.get("build_version", "")
         store.manifest = payload.get("manifest", {})
         store.documents = payload.get("documents", {})
         store.records = [Record.from_dict(d)

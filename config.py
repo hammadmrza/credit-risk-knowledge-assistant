@@ -45,6 +45,12 @@ RAG_TOP_K         = 5        # chunks retrieved per query
 RAG_MIN_SCORE     = 0.15     # cosine floor — below this, treat as "no match"
 RAG_MAX_CONTEXT   = 6_000    # max characters of context sent to the LLM
 
+# Bump this whenever a change to chunking or retrieval means an already-built
+# index should be rebuilt. On a hosted deploy the index is persisted; the app
+# auto-reingests the seed corpus when the stored build version differs from
+# this one, so a code update never silently serves a stale index.
+INDEX_BUILD_VERSION = "2024.1-bm25-synonyms"
+
 # ── Answer generation provider ───────────────────────────────────
 # Which LLM writes the final answer from the retrieved passages:
 #   "auto"      — use the Claude API if ANTHROPIC_API_KEY is set, else Ollama

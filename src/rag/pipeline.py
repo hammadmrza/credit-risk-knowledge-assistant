@@ -256,11 +256,13 @@ class RAGPipeline:
 
     def _finalize(self) -> None:
         self.store.embedding_signature = self.embedder.signature
+        self.store.build_version = config.INDEX_BUILD_VERSION
         self.store.save(self.index_path)
 
     def reset(self, save: bool = True) -> None:
         """Delete all indexed content."""
         self.store = VectorStore(embedding_signature=self.embedder.signature)
+        self.store.build_version = config.INDEX_BUILD_VERSION
         if save:
             self.store.save(self.index_path)
 
@@ -302,8 +304,11 @@ class RAGPipeline:
     def _bm25_retrieve(self, question: str, top_k: int) -> List[RetrievedChunk]:
         """Keyword retrieval via BM25. Empty result → the query shares no
         terms with any passage, which the caller turns into an honest refusal."""
+        from src.rag.bm25 import expand_query
         self._ensure_bm25()
-        scores = self._bm25.scores(question)
+        # Add formal synonyms (cap→maximum, floor→minimum) so a user's everyday
+        # phrasing still finds the policy row, which uses the formal wording.
+        scores = self._bm25.scores(expand_query(question))
         order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
         top = scores[order[0]] if order else 0.0
         out = []
@@ -561,6 +566,8 @@ class RAGPipeline:
             "embedding_backend": self.embedder.backend,
             "embedding_signature": self.embedder.signature,
             "index_signature": self.store.embedding_signature,
+            "index_build_version": self.store.build_version,
+            "current_build_version": config.INDEX_BUILD_VERSION,
             "generation_provider": self.generation,
             "generation_active": self._active_generation(),
             "audit_events": self.audit.count(),

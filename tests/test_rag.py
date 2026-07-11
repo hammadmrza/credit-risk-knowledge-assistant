@@ -169,6 +169,40 @@ def test_source_manifest_records_version():
         assert ans.sources[0].version.get("sha") == ver["sha"]
 
 
+def test_build_version_stamped_and_detects_stale_index():
+    import config
+    from src.rag.vector_store import VectorStore
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "policy.md").write_text("The DTI cap is 45 percent.",
+                                        encoding="utf-8")
+        idx = root / "index.json"
+        rag = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                          generation="ollama")
+        rag.ingest(root / "policy.md")
+        # A freshly built index carries the current build version...
+        assert rag.status()["index_build_version"] == config.INDEX_BUILD_VERSION
+        # ...and survives a save/load round-trip.
+        assert VectorStore.load(idx).build_version == config.INDEX_BUILD_VERSION
+        # An index written by an older version reads back as stale.
+        stale = VectorStore.load(idx)
+        stale.build_version = "old-version"
+        stale.save(idx)
+        s = RAGPipeline(index_path=idx, prefer_ollama=False, audit=False,
+                        generation="ollama").status()
+        assert s["index_build_version"] != s["current_build_version"]
+
+
+def test_synonym_expansion_bridges_everyday_wording():
+    from src.rag.bm25 import expand_query
+    # Everyday threshold words gain the formal synonym the docs actually use.
+    assert "maximum" in expand_query("what is the DTI cap")
+    assert "minimum" in expand_query("what is the credit score floor")
+    # A query with none of those words is returned untouched.
+    q = "what triggers a fraud decline"
+    assert expand_query(q) == q
+
+
 def test_audit_log_written():
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
