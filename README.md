@@ -1,5 +1,7 @@
 # Credit Risk Knowledge Assistant
 
+**▶ Live demo: [credit-risk-knowledge-assistant.streamlit.app](https://credit-risk-knowledge-assistant.streamlit.app/)**
+
 A **grounded question-answering assistant** for a lender's own
 documents — credit policies, procedures, model cards, product guides,
 regulatory filings, archived reports. Underwriters, compliance staff, and
@@ -150,7 +152,8 @@ for s in ans.sources:
 ## Deploy
 
 The chatbot is a self-contained Streamlit app that **auto-loads the seed
-documents on first run**, so hosting it is one step.
+documents on first run**, so hosting it is one step. A live instance runs at
+[credit-risk-knowledge-assistant.streamlit.app](https://credit-risk-knowledge-assistant.streamlit.app/).
 
 **Streamlit Community Cloud (free):** point [share.streamlit.io](https://share.streamlit.io)
 at this repo, main file `src/app/chatbot.py`. To preconfigure cloud answers,
