@@ -210,7 +210,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-rag = get_pipeline(config.INDEX_BUILD_VERSION)
+# getattr fallback: on a warm Streamlit host a redeploy can re-run this script
+# while an older `config` module is still cached in memory (Streamlit doesn't
+# reload imported modules on rerun). Tolerate that gracefully instead of
+# crashing; a full app reboot loads every module fresh.
+rag = get_pipeline(getattr(config, "INDEX_BUILD_VERSION", "bootstrap"))
 
 # Deployed hosts: pick up an API key from Streamlit Secrets if one is set,
 # so operators can preconfigure the cloud engine without code changes.
