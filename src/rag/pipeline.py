@@ -479,10 +479,20 @@ class RAGPipeline:
                 break
         picked.sort(key=lambda x: x[1])           # restore reading order
 
-        lines = ["Based on your documents:\n"]
+        lines = ["**Based on your documents:**\n"]
         for _, _, sent, cite, _ in picked:
-            lines.append(f"- {sent}  \n  <sup>— {cite}</sup>")
+            # Markdown-native muted citation (the chat renders without raw HTML,
+            # so <sup> would show as literal text). Shorten to source + section.
+            lines.append(f"- {sent}  \n  :gray[— {self._short_cite(cite)}]")
         return "\n".join(lines)
+
+    @staticmethod
+    def _short_cite(cite: str) -> str:
+        """Compact a breadcrumb citation to 'SOURCE › last section'."""
+        src = cite.split(" › ", 1)[0]
+        last = cite.replace(" › ", " > ").split(" > ")[-1].strip()
+        last = last.replace("[", "(").replace("]", ")")   # keep :gray[] intact
+        return f"{src} › {last}" if last and last != src else src
 
     @staticmethod
     def _split_sentences(text: str) -> List[str]:
