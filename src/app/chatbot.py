@@ -515,7 +515,10 @@ with _tab_chat:
     # Chat history
     for turn_i, turn in enumerate(st.session_state.history):
         with st.chat_message(turn["role"]):
-            st.markdown(turn["content"])
+            # Strip any stray HTML the chat can't render (older answer text used
+            # <sup> for citations). Done here in the entry script so the fix
+            # takes effect on a normal redeploy without a full app reboot.
+            st.markdown(turn["content"].replace("<sup>", "").replace("</sup>", ""))
             ans = turn.get("answer")
             if ans is not None:
                 render_sources(ans, key_prefix=str(turn_i))
