@@ -556,15 +556,28 @@ with _tab_chat:
 
     if question:
         st.session_state.history.append({"role": "user", "content": question})
-        with st.spinner("Searching your documents…"):
-            ans = rag.query(question)
-        if ans.grounded:
-            content = ans.text
-        else:
-            # Friendlier refusal that points back to the corpus scope.
-            hint = (" I can only answer from the loaded documents — try the "
-                    "**📋 What can I ask?** tab.") if topic_list else ""
-            content = f":orange[{ans.text}]{hint}"
-        st.session_state.history.append(
-            {"role": "assistant", "content": content, "answer": ans})
+        # Error boundary: a failure anywhere in retrieval/generation must never
+        # surface as a red stack trace. Show a calm, actionable message and keep
+        # the app alive; details go to the app logs (Manage app → Logs).
+        try:
+            with st.spinner("Searching your documents…"):
+                ans = rag.query(question)
+            if ans.grounded:
+                content = ans.text
+            else:
+                # Friendlier refusal that points back to the corpus scope.
+                hint = (" I can only answer from the loaded documents — try the "
+                        "**📋 What can I ask?** tab.") if topic_list else ""
+                content = f":orange[{ans.text}]{hint}"
+            st.session_state.history.append(
+                {"role": "assistant", "content": content, "answer": ans})
+        except Exception:
+            import traceback
+            print("query error:\n" + traceback.format_exc())  # → app logs
+            st.session_state.history.append({
+                "role": "assistant",
+                "content": (":red[Something went wrong answering that.] Please "
+                            "try again or rephrase. If it keeps happening, "
+                            "reload the page — your documents are safe."),
+                "answer": None})
         st.rerun()

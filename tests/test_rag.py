@@ -398,6 +398,13 @@ def _run_retrieval_battery(rag):
         ("What model type is used, and how was it trained?", "XGBoost"),
         ("What features does the PD model use?", "Features Used"),
         ("What fairness testing was done on the model?", "Fairness"),
+        # Phrasing variants — the same facts asked in different words.
+        ("maximum debt-to-income allowed", "DTI > 50%"),
+        ("credit score floor for approval", "500"),
+        ("how does the score map to probability of default", "odds"),
+        ("what human review is needed before a decline", "analyst"),
+        ("HELOC loan-to-value limit", "90%"),
+        ("Tell me about the model's limitations", "Limitations"),
     ]
     failures = []
     for q, needle in battery:
