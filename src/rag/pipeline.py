@@ -432,12 +432,14 @@ class RAGPipeline:
         verbatim from a source — so it's trustworthy *and* tidy.
         """
         import re
-        from src.rag.bm25 import content_tokens
+        from src.rag.bm25 import content_tokens, expand_query
 
-        q_terms = set(content_tokens(question))
+        # Match sentences on the *expanded* query (cap→maximum, floor→minimum)
+        # so a sentence phrased in the document's formal wording still scores.
+        q_terms = set(content_tokens(expand_query(question)))
         scored = []  # (score, order, sentence, citation)
         order = 0
-        for c in chunks[:3]:                      # top passages only
+        for c in chunks[:6]:                      # scan the top passages
             body = c.text.split("]\n", 1)[-1].strip()
             for sent in self._split_sentences(body):
                 s_terms = content_tokens(sent)
@@ -448,10 +450,12 @@ class RAGPipeline:
                     continue
                 # A sentence that ends in real terminal punctuation reads as a
                 # complete thought; a clipped fragment doesn't. Reward the
-                # former so whole sentences win over mid-wrap scraps.
+                # former so whole sentences win over mid-wrap scraps. Weight by
+                # the passage's own relevance (c.score) so a sentence from a
+                # more-relevant passage outranks one from a weaker match.
                 complete = bool(re.search(r"[.!?%)\]\d]$", sent))
-                score = (overlap * (1.0 if complete else 0.55)
-                         / (1 + 0.15 * order))
+                score = (overlap * (c.score or 0.1)
+                         * (1.0 if complete else 0.55))
                 if not complete:                  # signal the clip to the reader
                     sent = sent.rstrip(" ·,;:") + "…"
                 scored.append((score, order, sent, c.citation, complete))
