@@ -1,11 +1,15 @@
 # Credit Risk Knowledge Assistant
 
-A **local-first, grounded question-answering assistant** for a lender's own
+A **grounded question-answering assistant** for a lender's own
 documents — credit policies, procedures, model cards, product guides,
 regulatory filings, archived reports. Underwriters, compliance staff, and
 model-risk teams ask questions in plain English and get answers **drawn
 strictly from the source documents, with citations** they can click to
 verify.
+
+Runs two ways: **out of the box** on the cloud (Claude API) with **BM25
+keyword search** — no install needed — or **fully on-premise** with a local
+Ollama server, so confidential documents never leave your machine.
 
 Built as the knowledge companion to the
 [Credit Risk Platform](https://github.com/hammadmrza/credit-risk-platform):
@@ -25,10 +29,10 @@ the policies, models, and compliance posture behind them.
 
 | Principle | How |
 |---|---|
-| **Local-first / on-premise** | Embeddings and generation run through a local [Ollama](https://ollama.ai) server. Document content never leaves your infrastructure — the same PIPEDA rationale as the credit platform's on-prem LLM. |
+| **Cloud or on-premise** | Out of the box, search runs on **BM25 keyword ranking** and answers are written by the **Claude API** — no install. For confidential material, switch everything to a local [Ollama](https://ollama.ai) server so document content never leaves your infrastructure (the same PIPEDA rationale as the credit platform's on-prem LLM). |
 | **Grounded, never invented** | Answers use *only* retrieved passages and cite them. If nothing relevant is found, the assistant says so instead of guessing. |
 | **Auditable** | Every question, answer, and cited source (with the document's version) is written to an append-only audit trail. Each source is tagged with its ingest time and content hash. |
-| **Robust** | A retrieval eval set runs in CI so answer quality can't silently regress. Degrades gracefully with no Ollama, no GPU, and no third-party parsers. |
+| **Robust** | 19 tests plus a retrieval **battery + eval set** run in CI so answer quality can't silently regress. The on-disk index **self-heals** — it auto-rebuilds when the app is upgraded, so a deploy never serves a stale index. Degrades gracefully with no Ollama, no GPU, and no third-party parsers. |
 | **No database to run** | The index is a single JSON file on disk. |
 
 ---
@@ -56,9 +60,10 @@ python -m src.rag.cli chat
 streamlit run src/app/chatbot.py
 ```
 
-Without Ollama, the assistant still works: it uses a deterministic local
-(lexical) embedding and returns the relevant passages verbatim, with the
-same citations.
+Without Ollama, the assistant still works: search falls back to **BM25
+keyword ranking** (the algorithm behind Elasticsearch/Lucene) with synonym
+expansion and section-heading boosting, and — with no answer model — returns
+the relevant passages verbatim, with the same citations.
 
 ### Run fully local (private / on-prem)
 
@@ -107,7 +112,7 @@ The model is `ANTHROPIC_MODEL` (`claude-opus-4-8` by default; set it to
 from generation.** For meaning-based *search* without a local model, set
 `VOYAGE_API_KEY` and `RAG_EMBED_PROVIDER="voyage"` (Voyage cloud
 embeddings); otherwise search uses Ollama embeddings, and falls back to
-local keyword search if neither is available. For a fully on-prem
+local **BM25 keyword search** if neither is available. For a fully on-prem
 deployment over confidential documents, keep both retrieval and generation
 on Ollama so nothing leaves the machine.
 
@@ -115,13 +120,15 @@ on Ollama so nothing leaves the machine.
 
 ## What you get
 
-- **Chatbot UI** (`streamlit run src/app/chatbot.py`) — chat interface with
-  expandable source cards (passage, relevance score, document version),
-  a knowledge-base status sidebar, and drag-and-drop document ingestion.
-  New users are oriented automatically: a **"What can I ask about?"** panel
-  and clickable **topic chips** are derived from whatever documents are
-  loaded (so they stay accurate for any corpus), a plain-language answer-
-  engine picker, and off-topic questions get redirected to in-scope topics.
+- **Chatbot UI** (`streamlit run src/app/chatbot.py`) — a tabbed interface:
+  a **💬 Chat** tab with expandable source cards (passage, relevance score,
+  document version), plus reference tabs that stay accurate for any corpus:
+  **About**, **What can I ask?** (per-document outline + clickable topic
+  chips), **Strengths & limits** (a live readout of what the tool does well
+  and where it's limited in the *current* setup), **Glossary** (plain-language
+  definitions of terms found in your documents), and **Documents** (read any
+  source in full to verify answers). Also: a plain-language answer-engine
+  picker, a knowledge-base status sidebar, and drag-and-drop ingestion.
 - **REST API** (`uvicorn src.rag.api:app --port 8100`) — `/rag/query`,
   `/rag/ingest/*`, `/rag/status`, `/rag/reset`.
 - **CLI** — `ingest`, `query`, `chat`, `status`.
@@ -146,9 +153,12 @@ The chatbot is a self-contained Streamlit app that **auto-loads the seed
 documents on first run**, so hosting it is one step.
 
 **Streamlit Community Cloud (free):** point [share.streamlit.io](https://share.streamlit.io)
-at this repo, main file `src/app/chatbot.py`. Optionally add a
-`ANTHROPIC_API_KEY` in the app's **Secrets** to preconfigure cloud answers —
-otherwise each visitor pastes their own key (and no one spends yours).
+at this repo, main file `src/app/chatbot.py`. To preconfigure cloud answers,
+add `ANTHROPIC_API_KEY` in the app's **Secrets** — this persists across
+reboots, whereas a key pasted into the sidebar clears on restart. On a public
+app, a Secrets key is spent by every visitor, so set a spend limit on it (or
+let each visitor paste their own key). The index self-heals on deploy, so code
+updates don't require a manual rebuild.
 
 **Docker (anywhere):**
 
@@ -167,23 +177,24 @@ docker run -p 8501:8501 -e ANTHROPIC_API_KEY=sk-ant-... knowledge-assistant
 ## How it works
 
 ```
-ingest:  load documents → chunk (heading-aware) → embed → store
+ingest:  load documents → chunk (heading-aware) → index → store
          (+ record each source's ingest time & content hash)
-query:   embed question → retrieve top-k passages → grounded prompt
-         → cited answer → write audit-trail event
+query:   rank passages (BM25 keywords by default, or semantic embeddings)
+         → grounded prompt → cited answer → write audit-trail event
 ```
 
 | Module | Role |
 |---|---|
 | `src/rag/loaders.py` | Read md/txt/csv/json/pdf/docx (PDF/Word need optional parsers) |
 | `src/rag/chunker.py` | Heading-aware, overlapping chunks with section breadcrumbs |
-| `src/rag/embeddings.py` | Ollama embeddings, deterministic local fallback |
-| `src/rag/vector_store.py` | JSON-persisted cosine search + per-source version manifest |
-| `src/rag/pipeline.py` | Orchestration, grounding, anti-hallucination, audit |
+| `src/rag/bm25.py` | BM25 keyword ranking + synonym expansion + heading boost (default search) |
+| `src/rag/embeddings.py` | Ollama / Voyage embeddings for semantic search (optional) |
+| `src/rag/vector_store.py` | JSON-persisted store, cosine search, per-source version manifest, build-version stamp |
+| `src/rag/pipeline.py` | Orchestration, retrieval, grounding, anti-hallucination, audit |
 | `src/rag/audit.py` | Append-only JSONL audit trail |
 | `src/rag/api.py` | FastAPI router + standalone app |
 | `src/rag/cli.py` | Command-line interface |
-| `src/app/chatbot.py` | Streamlit chatbot UI |
+| `src/app/chatbot.py` | Streamlit chatbot UI (tabbed) |
 
 ### Anti-hallucination guarantees
 
@@ -192,7 +203,8 @@ query:   embed question → retrieve top-k passages → grounded prompt
 2. If nothing retrieves above the relevance floor, the pipeline **refuses
    to call the model** and returns "I could not find that in the knowledge
    base."
-3. Offline, answers are **extractive** — the user always sees real source text.
+3. With no answer model connected, answers are **extractive** — the user
+   always sees real, cited source text (never invented).
 
 ---
 
@@ -211,20 +223,25 @@ query:   embed question → retrieve top-k passages → grounded prompt
 ## Tests & evaluation
 
 ```bash
-python tests/test_rag.py        # 10 unit/integration tests (stdlib only)
+python tests/test_rag.py        # 19 unit/integration tests (stdlib only),
+                                # incl. a retrieval battery over the seed corpus
 python eval/eval_set.py         # retrieval recall@k over the seed corpus
 ```
 
-The eval ingests the seed knowledge base with the offline backend and checks
-that each known question retrieves its expected source document, failing if
-recall@5 drops below 0.70 — a regression guard for retrieval quality.
+The test suite includes a **retrieval battery**: a set of realistic questions
+that must each retrieve a passage containing the actual answer, so a
+phrasing/retrieval regression fails in CI instead of reaching users. The eval
+additionally checks recall@5 over the seed corpus, failing below 0.70 — a
+regression guard for retrieval quality.
 
 ---
 
 ## Configuration
 
-All settings live in `config.py` (knowledge/store paths, Ollama model,
-chunk size, top-k, relevance floor, audit toggle).
+All settings live in `config.py` (knowledge/store paths, generation &
+embedding providers, chunk size, top-k, relevance floor, audit toggle, and
+`INDEX_BUILD_VERSION` — bump it when a chunking/retrieval change should force
+a rebuild of any already-deployed index).
 
 ## Adapting to other document sets
 
