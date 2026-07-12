@@ -36,7 +36,15 @@ st.set_page_config(page_title="Knowledge Assistant", page_icon="📚",
 
 
 @st.cache_resource
-def get_pipeline() -> RAGPipeline:
+def get_pipeline(build_version: str) -> RAGPipeline:
+    """Cached pipeline, keyed on the app's build version.
+
+    Streamlit keeps @st.cache_resource objects alive across code redeploys on a
+    warm host. Without a cache key, a code update that changes retrieval would
+    keep serving the *old* pipeline object (old methods) until a manual reboot —
+    silently negating the update. Passing the build version makes a new version
+    mint a fresh pipeline automatically, no reboot needed.
+    """
     return RAGPipeline()
 
 
@@ -202,7 +210,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-rag = get_pipeline()
+rag = get_pipeline(config.INDEX_BUILD_VERSION)
 
 # Deployed hosts: pick up an API key from Streamlit Secrets if one is set,
 # so operators can preconfigure the cloud engine without code changes.
