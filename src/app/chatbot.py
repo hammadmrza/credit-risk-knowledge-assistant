@@ -329,7 +329,14 @@ first_visit = not st.session_state.history
 # are protected: we only auto-rebuild the *seed-only* corpus; if custom docs
 # are present we show a one-click Rebuild prompt instead of wiping them.
 seed_names = {p.name for p in Path(config.KNOWLEDGE_DIR).glob("*") if p.is_file()}
-_stale = status.get("index_build_version") != status.get("current_build_version")
+# The index is stale if (a) it was built by an older app version, or (b) it was
+# built with a different embedding backend than the one now active — e.g. after
+# turning on Voyage semantic search, an index built with the local embedding
+# would give wrong results until rebuilt. Either way, rebuild.
+_ver_stale = status.get("index_build_version") != status.get("current_build_version")
+_sig_stale = (bool(status.get("index_signature"))
+              and status.get("index_signature") != status.get("embedding_signature"))
+_stale = _ver_stale or _sig_stale
 _only_seed = bool(status["sources"]) and set(status["sources"]).issubset(seed_names)
 
 if status["num_chunks"] == 0:
