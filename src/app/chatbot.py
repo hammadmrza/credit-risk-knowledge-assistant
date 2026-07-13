@@ -311,8 +311,10 @@ with st.sidebar:
                 st.caption("Search: keyword (local). ⚠️ Voyage key + package "
                            "present but not yet used — reboot to apply.")
         else:
-            st.caption("Search: keyword (local). No VOYAGE_API_KEY detected — "
-                       "set it in Secrets (or run Ollama) for semantic search.")
+            # No Voyage configured — this is the intended keyword mode, not a
+            # misconfig, so state it plainly. (How to enable semantic search is
+            # documented in the ✅ Strengths & limits tab.)
+            st.caption("Search: keyword (BM25, local)")
 
     if st.button("🔄 (Re)load sample documents", use_container_width=True):
         with st.spinner("Indexing…"):
@@ -507,12 +509,36 @@ with _tab_strength:
                    "across documents.  \n*Fix:* paste a Claude API key in the "
                    "sidebar for written answers.")
 
+    # Data privacy — config-aware. Cloud engines send text off-machine; a fully
+    # local (Ollama) setup does not. This matters most for confidential data.
+    cloud_active = ai_on or _eb == "voyage"
+    if cloud_active:
+        _who = " and ".join(
+            ([" Anthropic (Claude)"] if ai_on else [])
+            + ([" Voyage"] if _eb == "voyage" else [])).strip()
+        st.warning(f"**Data leaves this machine.** Your question and the "
+                   f"retrieved passages (not the whole corpus) are sent to "
+                   f"{_who} to produce the answer.  \n*For confidential "
+                   "material, run fully on-computer with Ollama instead.*")
+    else:
+        st.success("**Nothing leaves this machine.** Search and answers run "
+                   "locally — no document text is sent to any external service.")
+
     # Always-true boundaries.
     st.markdown(
+        "- **Verify before you act** — the AI can occasionally misread a "
+        "passage, so every claim is cited: open **Sources** and check the "
+        "original for anything you'll rely on.\n"
+        "- **\"Not found\" isn't proof** — if it can't find something, the "
+        "wording may just not match; try rephrasing before concluding the "
+        "documents don't cover it.\n"
         "- **Knows only what's loaded** — the documents in the sidebar, and "
-        "nothing outside them (no web, no live systems).\n"
-        "- **Not legal or credit advice** — it reports what your documents "
-        "say; a qualified person still makes the decision.\n"
+        "nothing outside them (no web, no live systems, no calculations).\n"
+        "- **Reports policy, doesn't decide** — it tells you what your "
+        "documents say; it does not make or replace a credit decision, and "
+        "it isn't legal advice.\n"
+        "- **Needs machine-readable text** — scanned PDFs without a text layer "
+        "won't ingest properly (no OCR).\n"
         "- **Answers are as-of dated** — they reflect the document versions "
         "shown; re-ingest after a policy update to stay current.")
 
