@@ -591,6 +591,8 @@ class RAGPipeline:
             "index_signature": self.store.embedding_signature,
             "index_build_version": self.store.build_version,
             "current_build_version": config.INDEX_BUILD_VERSION,
+            "voyage_error": __import__("src.rag.embeddings", fromlist=["x"]
+                                       ).last_voyage_error(),
             "generation_provider": self.generation,
             "generation_active": self._active_generation(),
             "audit_events": self.audit.count(),

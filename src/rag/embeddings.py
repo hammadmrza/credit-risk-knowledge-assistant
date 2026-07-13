@@ -75,6 +75,15 @@ def voyage_embeddings_available() -> bool:
         return False
 
 
+# Last Voyage API error, surfaced in the UI so a misconfigured key/quota is
+# diagnosable without digging through server logs.
+_LAST_VOYAGE_ERROR: Optional[str] = None
+
+
+def last_voyage_error() -> Optional[str]:
+    return _LAST_VOYAGE_ERROR
+
+
 def _voyage_embed(text: str, model: str,
                   input_type: Optional[str] = None) -> Optional[List[float]]:
     """Embed one string via the Voyage API; ``None`` if unavailable.
@@ -83,6 +92,7 @@ def _voyage_embed(text: str, model: str,
     meaning (so "borrowing limit" finds "maximum loan amount"). Never
     raises: returns ``None`` so the caller falls back.
     """
+    global _LAST_VOYAGE_ERROR
     try:
         import voyageai  # type: ignore
 
@@ -90,8 +100,10 @@ def _voyage_embed(text: str, model: str,
         result = client.embed([text], model=model, input_type=input_type)
         vecs = getattr(result, "embeddings", None)
         if vecs:
+            _LAST_VOYAGE_ERROR = None
             return [float(x) for x in vecs[0]]
     except Exception as e:
+        _LAST_VOYAGE_ERROR = f"{type(e).__name__}: {e}"
         log.warning("Voyage embedding failed (%s) — falling back.", e)
     return None
 

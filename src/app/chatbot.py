@@ -303,9 +303,13 @@ with st.sidebar:
             st.caption("Search: keyword (local). ⚠️ VOYAGE_API_KEY is set but "
                        "the `voyageai` package isn't available in this build.")
         elif _has_voyage and _voyage_pkg:
-            st.caption("Search: keyword (local). ⚠️ Voyage key + package present "
-                       "but search resolved to local — the key may be invalid "
-                       "or this app hasn't reloaded the latest code (reboot).")
+            _verr = status.get("voyage_error")
+            if _verr:
+                st.caption("Search: keyword (local). ⚠️ Voyage call failed — "
+                           f"`{_verr[:120]}`. Check the key is valid/active.")
+            else:
+                st.caption("Search: keyword (local). ⚠️ Voyage key + package "
+                           "present but not yet used — reboot to apply.")
         else:
             st.caption("Search: keyword (local). No VOYAGE_API_KEY detected — "
                        "set it in Secrets (or run Ollama) for semantic search.")
