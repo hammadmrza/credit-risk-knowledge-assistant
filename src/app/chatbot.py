@@ -418,9 +418,9 @@ _corpus_text = "\n".join(rag.document_text(s) or "" for s in docs)
 # The conversation lives in its own tab; the rest are reference panels, so the
 # chat page stays clean instead of sharing a scroll with the About text.
 (_tab_chat, _tab_about, _tab_ask, _tab_strength,
- _tab_glossary, _tab_docs) = st.tabs(
+ _tab_glossary, _tab_docs, _tab_roadmap) = st.tabs(
     ["💬 Chat", "ℹ️ About", "📋 What can I ask?", "✅ Strengths & limits",
-     "📖 Glossary", "📄 Documents"])
+     "📖 Glossary", "📄 Documents", "🗺️ Roadmap"])
 
 with _tab_about:
     st.markdown(
@@ -577,6 +577,46 @@ with _tab_docs:
             st.markdown(text)
         else:
             st.text(text)
+
+with _tab_roadmap:
+    st.caption("Directions this could grow, prioritized — **not yet built.** "
+               "Listed to show where the design goes next, and that its "
+               "current limits are understood, not hidden.")
+
+    st.markdown("#### 🔍 Retrieval quality")
+    st.markdown(
+        "- **Hybrid retrieval + reranker** — combine keyword (BM25) *and* "
+        "semantic embeddings, then re-rank the results. Closes the synonym "
+        "gap (e.g. matching *“secured products”* to the *HELOC* section).\n"
+        "- **Table-aware chunking** — so terse policy tables (like the DTI / "
+        "P-02 hard rule) are indexed and retrieved as cleanly as prose.")
+
+    st.markdown("#### 🧠 Answer trust")
+    st.markdown(
+        "- **Span-level citations** — highlight the exact sentence in the "
+        "source that supports each claim, not just the passage.\n"
+        "- **Answer-confidence signal** — flag how well-grounded each answer "
+        "is, so a thin match is visibly a thin match.\n"
+        "- **Feedback loop** — 👍/👎 on answers feeds the evaluation set, so "
+        "retrieval quality improves with use.")
+
+    st.markdown("#### 🏢 Enterprise & governance")
+    st.markdown(
+        "- **OCR / scanned-document ingestion** — extract text from images "
+        "and scanned PDFs (Tesseract or a local vision model on-prem; "
+        "Claude-vision or AWS Textract in the cloud) so paper policies and "
+        "scanned filings become searchable. OCR-derived text is flagged and "
+        "citation-verifiable.\n"
+        "- **Access control** — per-user document permissions (today anyone "
+        "with the app sees every loaded document).\n"
+        "- **Scale-out store** — swap the single JSON index for a vector "
+        "database (FAISS / pgvector / Qdrant) for large corpora.\n"
+        "- **Compliance tooling** — PII redaction before any cloud call, "
+        "policy-version diffs (“what changed between v1.1 and v1.2”), and a "
+        "one-click examiner audit export.")
+
+    st.caption("Have a direction you'd prioritize? These are starting points, "
+               "not a fixed plan.")
 
 # ── 💬 Chat tab — the actual conversation, on its own page ───────
 with _tab_chat:
