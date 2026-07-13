@@ -583,11 +583,25 @@ with _tab_roadmap:
                "Listed to show where the design goes next, and that its "
                "current limits are understood, not hidden.")
 
+    st.markdown("#### ⭐ Priority next step — Hybrid retrieval + reranker")
+    st.info(
+        "**The single highest-leverage upgrade.** Today search uses one method "
+        "at a time — keyword *or* semantic. This adds a **two-stage** pipeline:\n\n"
+        "1. **Retrieve wide** — run keyword (BM25) *and* semantic embeddings "
+        "together and merge them (Reciprocal Rank Fusion). Keyword nails exact "
+        "terms (rule codes, numbers); semantic nails meaning/synonyms.\n"
+        "2. **Rerank precise** — a cross-encoder re-reads the top ~30 candidates "
+        "*with* the question and keeps the best 5–8 for the answer.\n\n"
+        "**Why it matters:** this is the direct fix for the synonym / "
+        "wrong-passage misses (e.g. *“secured products”* → the *HELOC* section). "
+        "It's the step that moves retrieval from good to genuinely reliable — "
+        "and the clearest path from a strong demo toward production quality.\n\n"
+        "*Best built on a resourced environment* (paid Voyage/Cohere rerank "
+        "API, or local Ollama embeddings + a reranker on a GPU box) rather than "
+        "the free hosted tier.")
+
     st.markdown("#### 🔍 Retrieval quality")
     st.markdown(
-        "- **Hybrid retrieval + reranker** — combine keyword (BM25) *and* "
-        "semantic embeddings, then re-rank the results. Closes the synonym "
-        "gap (e.g. matching *“secured products”* to the *HELOC* section).\n"
         "- **Table-aware chunking** — so terse policy tables (like the DTI / "
         "P-02 hard rule) are indexed and retrieved as cleanly as prose.")
 
