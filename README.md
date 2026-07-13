@@ -34,7 +34,7 @@ the policies, models, and compliance posture behind them.
 | **Cloud or on-premise** | Out of the box, search runs on **BM25 keyword ranking** and answers are written by the **Claude API** — no install. For confidential material, switch everything to a local [Ollama](https://ollama.ai) server so document content never leaves your infrastructure (the same PIPEDA rationale as the credit platform's on-prem LLM). |
 | **Grounded, never invented** | Answers use *only* retrieved passages and cite them. If nothing relevant is found, the assistant says so instead of guessing. |
 | **Auditable** | Every question, answer, and cited source (with the document's version) is written to an append-only audit trail. Each source is tagged with its ingest time and content hash. |
-| **Robust** | 19 tests plus a retrieval **battery + eval set** run in CI so answer quality can't silently regress. The on-disk index **self-heals** — it auto-rebuilds when the app is upgraded, so a deploy never serves a stale index. Degrades gracefully with no Ollama, no GPU, and no third-party parsers. |
+| **Robust** | 19 tests plus a retrieval **battery + eval set** run in CI so answer quality can't silently regress. The on-disk index **self-heals** — it auto-rebuilds when the app is upgraded, so a deploy never serves a stale index. An **error boundary** turns any runtime failure into a calm message instead of a crash, and the sidebar **self-diagnoses** a misconfigured search backend. Degrades gracefully with no Ollama, no GPU, and no third-party parsers. |
 | **No database to run** | The index is a single JSON file on disk. |
 
 ---
@@ -127,10 +127,12 @@ on Ollama so nothing leaves the machine.
   document version), plus reference tabs that stay accurate for any corpus:
   **About**, **What can I ask?** (per-document outline + clickable topic
   chips), **Strengths & limits** (a live readout of what the tool does well
-  and where it's limited in the *current* setup), **Glossary** (plain-language
-  definitions of terms found in your documents), and **Documents** (read any
-  source in full to verify answers). Also: a plain-language answer-engine
-  picker, a knowledge-base status sidebar, and drag-and-drop ingestion.
+  and where it's limited in the *current* setup, including a live data-privacy
+  note), **Glossary** (plain-language definitions of terms found in your
+  documents), **Documents** (read any source in full to verify answers), and
+  **Roadmap** (prioritized future directions). Also: a plain-language
+  answer-engine picker, a knowledge-base status sidebar, and drag-and-drop
+  ingestion.
 - **REST API** (`uvicorn src.rag.api:app --port 8100`) — `/rag/query`,
   `/rag/ingest/*`, `/rag/status`, `/rag/reset`.
 - **CLI** — `ingest`, `query`, `chat`, `status`.
