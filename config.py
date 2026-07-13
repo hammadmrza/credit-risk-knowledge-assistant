@@ -50,7 +50,7 @@ RAG_MAX_CONTEXT   = 6_000    # max characters of context sent to the LLM
 # index should be rebuilt. On a hosted deploy the index is persisted; the app
 # auto-reingests the seed corpus when the stored build version differs from
 # this one, so a code update never silently serves a stale index.
-INDEX_BUILD_VERSION = "2024.2-bm25-heading-boost"
+INDEX_BUILD_VERSION = "2024.3-voyage-secrets-bridge"
 
 # ── Answer generation provider ───────────────────────────────────
 # Which LLM writes the final answer from the retrieved passages:

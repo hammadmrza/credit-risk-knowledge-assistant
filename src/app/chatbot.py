@@ -210,19 +210,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Bridge Streamlit Secrets → environment BEFORE the pipeline is built. Streamlit
+# does not reliably expose secrets as env vars, and the embedder resolves its
+# backend from the environment, so a VOYAGE_API_KEY added in Secrets only takes
+# effect if it's in os.environ before get_pipeline() constructs the embedder.
+def _bridge_secret(key: str) -> None:
+    try:
+        if key in st.secrets and not os.getenv(key):
+            os.environ[key] = str(st.secrets[key])
+    except Exception:
+        pass  # no secrets.toml present — fine
+for _k in ("ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "RAG_EMBED_PROVIDER"):
+    _bridge_secret(_k)
+# config read RAG_EMBED_PROVIDER at import; honor a Secrets override at runtime.
+config.RAG_EMBED_PROVIDER = os.getenv("RAG_EMBED_PROVIDER",
+                                      config.RAG_EMBED_PROVIDER)
+
 # getattr fallback: on a warm Streamlit host a redeploy can re-run this script
 # while an older `config` module is still cached in memory (Streamlit doesn't
 # reload imported modules on rerun). Tolerate that gracefully instead of
 # crashing; a full app reboot loads every module fresh.
 rag = get_pipeline(getattr(config, "INDEX_BUILD_VERSION", "bootstrap"))
-
-# Deployed hosts: pick up an API key from Streamlit Secrets if one is set,
-# so operators can preconfigure the cloud engine without code changes.
-try:
-    if "ANTHROPIC_API_KEY" in st.secrets and not os.getenv("ANTHROPIC_API_KEY"):
-        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-except Exception:
-    pass  # no secrets.toml present — fine
 
 status = rag.status()
 
