@@ -36,14 +36,18 @@ st.set_page_config(page_title="Knowledge Assistant", page_icon="📚",
 
 
 @st.cache_resource
-def get_pipeline(build_version: str) -> RAGPipeline:
-    """Cached pipeline, keyed on the app's build version.
+def get_pipeline(build_version: str, embed_fingerprint: str) -> RAGPipeline:
+    """Cached pipeline, keyed on the app's build version AND the embedding
+    configuration.
 
     Streamlit keeps @st.cache_resource objects alive across code redeploys on a
-    warm host. Without a cache key, a code update that changes retrieval would
-    keep serving the *old* pipeline object (old methods) until a manual reboot —
-    silently negating the update. Passing the build version makes a new version
-    mint a fresh pipeline automatically, no reboot needed.
+    warm host, and it does NOT reload imported modules on a warm rerun — so
+    `build_version` (read from the cached config module) can stay stale and the
+    cache never busts. Keying on `embed_fingerprint` (whether a Voyage key is
+    present, and which provider is selected) means the moment semantic search
+    should turn on, the key changes and a fresh pipeline is built — no full
+    reboot required. `embed_fingerprint` is derived from the environment, which
+    the entry script sets from Secrets before this is called.
     """
     return RAGPipeline()
 
@@ -230,7 +234,10 @@ config.RAG_EMBED_PROVIDER = os.getenv("RAG_EMBED_PROVIDER",
 # while an older `config` module is still cached in memory (Streamlit doesn't
 # reload imported modules on rerun). Tolerate that gracefully instead of
 # crashing; a full app reboot loads every module fresh.
-rag = get_pipeline(getattr(config, "INDEX_BUILD_VERSION", "bootstrap"))
+# Fingerprint the embedding config so the cached pipeline is rebuilt the moment
+# a Voyage key / provider change should switch search backends (see get_pipeline).
+_embed_fp = f"{os.getenv('RAG_EMBED_PROVIDER', 'auto')}|voyage={bool(os.getenv('VOYAGE_API_KEY'))}"
+rag = get_pipeline(getattr(config, "INDEX_BUILD_VERSION", "bootstrap"), _embed_fp)
 
 status = rag.status()
 
@@ -284,8 +291,24 @@ with st.sidebar:
     elif _eb == "voyage":
         st.caption("Search: semantic (Voyage cloud embeddings)")
     else:
-        st.caption("Search: keyword (local). Run Ollama or set VOYAGE_API_KEY "
-                   "for meaning-based search.")
+        # Self-diagnostic: when we're on local search but a Voyage key is
+        # present, say *why* semantic didn't turn on, so misconfig is obvious.
+        _has_voyage = bool(os.getenv("VOYAGE_API_KEY"))
+        try:
+            import voyageai  # noqa: F401
+            _voyage_pkg = True
+        except Exception:
+            _voyage_pkg = False
+        if _has_voyage and not _voyage_pkg:
+            st.caption("Search: keyword (local). ⚠️ VOYAGE_API_KEY is set but "
+                       "the `voyageai` package isn't available in this build.")
+        elif _has_voyage and _voyage_pkg:
+            st.caption("Search: keyword (local). ⚠️ Voyage key + package present "
+                       "but search resolved to local — the key may be invalid "
+                       "or this app hasn't reloaded the latest code (reboot).")
+        else:
+            st.caption("Search: keyword (local). No VOYAGE_API_KEY detected — "
+                       "set it in Secrets (or run Ollama) for semantic search.")
 
     if st.button("🔄 (Re)load sample documents", use_container_width=True):
         with st.spinner("Indexing…"):
