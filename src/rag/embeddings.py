@@ -108,6 +108,37 @@ def _voyage_embed(text: str, model: str,
     return None
 
 
+def _voyage_embed_batch(texts: List[str], model: str,
+                        input_type: Optional[str] = None,
+                        batch_size: int = 128) -> Optional[List[List[float]]]:
+    """Embed many strings in as few Voyage calls as possible (≤128 per call).
+
+    One batched request per 128 texts instead of one per text — this is what
+    keeps ingest under low free-tier rate limits. ``None`` on any failure so
+    the caller falls back to the local embedding for the whole set.
+    """
+    global _LAST_VOYAGE_ERROR
+    out: List[List[float]] = []
+    try:
+        import voyageai  # type: ignore
+
+        client = voyageai.Client()
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            result = client.embed(batch, model=model, input_type=input_type)
+            vecs = getattr(result, "embeddings", None)
+            if not vecs or len(vecs) != len(batch):
+                _LAST_VOYAGE_ERROR = "Voyage returned an unexpected result shape"
+                return None
+            out.extend([float(x) for x in v] for v in vecs)
+        _LAST_VOYAGE_ERROR = None
+        return out
+    except Exception as e:
+        _LAST_VOYAGE_ERROR = f"{type(e).__name__}: {e}"
+        log.warning("Voyage batch embedding failed (%s) — falling back.", e)
+    return None
+
+
 # ── Local hashing backend (dependency-free) ──────────────────────
 
 def _tokenize(text: str) -> List[str]:
@@ -251,5 +282,22 @@ class Embedder:
         return _hash_embed(text, self.dim)
 
     def embed_many(self, texts: List[str]) -> List[List[float]]:
-        """Embed a list of strings (sequential)."""
+        """Embed a list of strings, batching where the backend supports it.
+
+        Voyage accepts many texts per request, so ingesting N chunks is a few
+        batched calls instead of N — far faster and, crucially, it stays under
+        low free-tier rate limits (which a per-chunk burst would blow through).
+        """
+        if not texts:
+            return []
+        backend = self._resolve_backend()
+        if backend == "voyage":
+            vecs = _voyage_embed_batch(texts, self.voyage_model,
+                                       input_type="document")
+            if vecs is not None:
+                return vecs
+            log.warning("Voyage batch embedding failed — local fallback.")
+            self._backend = "local"
+            return [_hash_embed(t, self.dim) for t in texts]
+        # Ollama / local: no batch endpoint here — embed per item.
         return [self.embed(t) for t in texts]

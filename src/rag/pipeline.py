@@ -207,8 +207,10 @@ class RAGPipeline:
         ingested_at = _now_iso()
         chunks = chunk_document(text, source, self.chunk_size, self.overlap,
                                 base_meta=meta)
-        for ch in chunks:
-            vec = self.embedder.embed(ch.text)
+        # Batch-embed all chunks in as few calls as the backend allows — one
+        # burst of per-chunk calls would blow through low API rate limits.
+        vecs = self.embedder.embed_many([ch.text for ch in chunks])
+        for ch, vec in zip(chunks, vecs):
             self.store.add(
                 id=self._chunk_id(source, ch.index, ch.text),
                 text=ch.text, embedding=vec, source=source,
